@@ -23,7 +23,7 @@ class Compressor:
     def __init__(self, response, clipboard):
         self.response, self.clipboard, self.sources = response, clipboard, []
 
-    async def run(self, serialized, emit, save_invalid):
+    async def run(self, serialized, emit, save_invalid, save_raw=None):
         self.sources.append(serialized)
         emit('requesting', attempt=1, key_number=1, message='request')
         if isinstance(self.response, Exception):
@@ -127,6 +127,35 @@ def test_invalid_input_never_calls_api(tmp_path, compressed):
         await manager.wait(job['id'])
         assert manager.get(job['id'])['state'] == 'failed'
         assert not compressor.sources and not clipboard.writes
+    asyncio.run(scenario())
+
+
+def test_validation_failure_is_visible_saved_and_manually_copyable(tmp_path, tiny_html):
+    from backend.compression import Compressor as RealCompressor
+    from tests.test_compression import Transport
+
+    async def scenario():
+        manager, clipboard, _ = setup(tmp_path, None)
+        prompt = tmp_path / 'prompt.txt'
+        prompt.write_text('instructions', encoding='utf-8')
+        last = '  invalid final draft\n\n'
+        manager.compressor_factory = lambda: RealCompressor(prompt, [(1, 'fake')],
+            transport=Transport(['first invalid draft', last]))
+        job = manager.start(html=tiny_html)
+        await manager.wait(job['id'])
+        result = manager.get(job['id'])
+        assert result['state'] == 'failed' and '검증 실패' in result['error']
+        assert result['compressed'] == last
+        assert result['body_char_count'] == len(last.replace('\n', ''))
+        assert clipboard.writes == [result['serialized']]
+        restored = JobManager(manager.settings, clipboard=clipboard)
+        assert restored.artifact(job['id'], 'compressed.txt') == last
+        await restored.copy_result(job['id'], 'compressed')
+        assert clipboard.writes[-1] == last
+        # Existing failure records have only invalid_response_N.txt artifacts.
+        (tmp_path / result['output_dir'] / 'compressed.txt').unlink()
+        legacy = JobManager(manager.settings, clipboard=clipboard)
+        assert legacy.get(job['id'])['compressed'] == last
     asyncio.run(scenario())
 
 

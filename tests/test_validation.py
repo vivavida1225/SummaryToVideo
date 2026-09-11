@@ -11,6 +11,16 @@ def test_plain_narration_preserves_lines_and_counts_all_text(compressed, seriali
     assert not result.warnings
 
 
+def test_collects_both_markets_rates_direction_and_shape(compressed, serialized):
+    bad = compressed.replace('7051.61', '7000.00').replace('835.97', '800.00')
+    bad = bad.replace('0.67% 오른', '0.68% 내린')
+    bad += '\n추가 장면입니다.'
+    with pytest.raises(ValidationError) as caught:
+        validate_compressed(bad, serialized)
+    for expected in ('5줄', '종료 인사', '코스피 최종 지수', '코스닥 최종 지수', '코스닥 등락률', '코스닥 등락 방향'):
+        assert any(expected in issue for issue in caught.value.issues)
+
+
 def test_normalizes_only_outer_whitespace_and_windows_newlines(compressed, serialized):
     assert validate_compressed('\r\n' + compressed.replace('\n', '\r\n') + '\r\n', serialized).text == compressed
 
@@ -116,13 +126,40 @@ def test_invalid_narration_contract_rejected(compressed, serialized, kind):
         validate_compressed('\n'.join(lines), serialized)
 
 
-def test_short_script_warns_and_hard_limit_counts_greetings(compressed, serialized):
+@pytest.mark.parametrize('size,allowed', [(489, False), (490, True), (500, True), (550, True), (551, False), (650, False)])
+def test_length_contract_counts_greetings_and_rejects_both_bounds(compressed, serialized, size, allowed):
     lines = compressed.splitlines()
     lines[1:4] = ['정보가 부족합니다.'] * 3
-    assert validate_compressed('\n'.join(lines), serialized).warnings
     base = sum(map(len, lines))
-    lines[1] = '가' * (650 - base) + lines[1]
-    assert validate_compressed('\n'.join(lines), serialized).body_char_count == 650
-    lines[1] = '가' + lines[1]
-    with pytest.raises(ValidationError, match='650'):
+    lines[1] = '가' * (size - base) + lines[1]
+    if allowed:
+        result = validate_compressed('\n'.join(lines), serialized)
+        assert result.body_char_count == size
+        assert not result.warnings
+    else:
+        with pytest.raises(ValidationError, match='490|550'):
+            validate_compressed('\n'.join(lines), serialized)
+
+
+@pytest.mark.parametrize('word', ['급락', '폭락', '내림세'])
+def test_downward_synonyms_preserve_direction(compressed, serialized, word):
+    source = serialized.replace('+5.60 (0.67%)', '-5.60 (-0.67%)')
+    text = compressed.replace('0.67% 오른 835.97', f'835.97로 0.67% {word}를 보인 수준')
+    assert validate_compressed(text, source).text
+    with pytest.raises(ValidationError, match='등락 방향'):
+        validate_compressed(text, serialized)
+
+
+@pytest.mark.parametrize('word', ['급등', '폭등', '반등', '오름세'])
+def test_upward_synonyms_preserve_direction(compressed, serialized, word):
+    text = compressed.replace('0.67% 오른 835.97', f'835.97로 0.67% {word}를 보인 수준')
+    assert validate_compressed(text, serialized).text
+    with pytest.raises(ValidationError, match='등락 방향'):
+        validate_compressed(text, serialized.replace('+5.60 (0.67%)', '-5.60 (-0.67%)'))
+
+
+def test_short_sparse_source_is_not_silently_accepted(compressed, serialized):
+    lines = compressed.splitlines()
+    lines[1:4] = ['자료에서 확인되지 않습니다.'] * 3
+    with pytest.raises(ValidationError, match='490'):
         validate_compressed('\n'.join(lines), serialized)

@@ -73,3 +73,54 @@ def test_validation_errors_use_string_detail_contract(tmp_path):
         response = c.post('/api/jobs', headers=auth(c), json={})
         assert response.status_code == 422
         assert isinstance(response.json()['detail'], str)
+
+
+def test_failed_narration_poll_copy_and_download(tmp_path, tiny_html):
+    from backend.compression import Compressor
+    from tests.test_compression import Transport
+
+    prompt = tmp_path / 'prompt.txt'
+    prompt.write_text('instructions', encoding='utf-8')
+    draft = 'invalid final narration\nsecond line'
+    with client(tmp_path) as c:
+        manager = c.app.state.manager
+        manager.compressor_factory = lambda: Compressor(prompt, [(1, 'fake')],
+            transport=Transport(['invalid first draft', draft]))
+        copied = []
+        manager.clipboard.write = copied.append
+        headers = auth(c)
+        job_id = c.post('/api/jobs', headers=headers, json={'html': tiny_html}).json()['id']
+        c.portal.call(manager.wait, job_id)
+        job = c.get(f'/api/jobs/{job_id}', headers=headers).json()
+        assert job['state'] == 'failed' and job['compressed'] == draft
+        assert c.post(f'/api/jobs/{job_id}/copy', headers=headers, json={'stage': 'compressed'}).status_code == 200
+        assert copied[-1] == draft
+        response = c.get(f'/api/jobs/{job_id}/artifacts/compressed.txt', headers=headers)
+        assert response.status_code == 200 and response.text == draft
+
+
+def test_delimited_response_is_saved_copied_and_downloaded_as_five_lines(tmp_path, tiny_html, compressed):
+    from backend.compression import Compressor
+    from tests.test_compression import Transport
+    from pathlib import Path
+
+    prompt = tmp_path / 'prompt.txt'
+    prompt.write_text('instructions', encoding='utf-8')
+    raw = compressed.replace('\n', '<SCENE_BREAK>')
+    with client(tmp_path) as c:
+        manager = c.app.state.manager
+        manager.compressor_factory = lambda: Compressor(prompt, [(1, 'fake')], transport=Transport([raw]))
+        copied = []
+        manager.clipboard.write = copied.append
+        headers = auth(c)
+        job_id = c.post('/api/jobs', headers=headers, json={'html': tiny_html}).json()['id']
+        c.portal.call(manager.wait, job_id)
+        job = c.get(f'/api/jobs/{job_id}', headers=headers).json()
+        assert job['state'] == 'completed' and job['compressed'] == compressed
+        assert copied[-1] == compressed
+        folder = tmp_path / job['output_dir']
+        assert (folder / 'raw_response_1.txt').read_text(encoding='utf-8') == raw
+        assert (folder / 'compressed.txt').read_text(encoding='utf-8') == compressed
+        manager.jobs.pop(job_id)
+        assert c.get(f'/api/jobs/{job_id}', headers=headers).json()['compressed'] == compressed
+        assert c.get(f'/api/jobs/{job_id}/artifacts/compressed.txt', headers=headers).text == compressed

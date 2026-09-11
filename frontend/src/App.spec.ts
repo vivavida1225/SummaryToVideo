@@ -249,9 +249,9 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: '압축 다시 시도' })).not.toBeInTheDocument()
   })
 
-  it('완료 결과를 서버 클립보드로 복사하고 인증된 아티팩트로 다운로드한다', async () => {
+  it.each(['completed', 'failed'] as const)('%s 결과를 같은 article에서 복사하고 다운로드한다', async (state) => {
     sessionStorage.setItem('market-compressor.job-id', 'job-1')
-    const completed = makeJob({ state: 'completed', serialized: '직렬화', compressed: '최종 압축본', scene_count: 5, body_char_count: 480 })
+    const completed = makeJob({ state, error: state === 'failed' ? '응답 검증 실패: 분량 미달' : null, serialized: '직렬화', compressed: '최종 압축본', scene_count: 5, body_char_count: 480 })
     const fetchMock = installBootstrapFetch((path) => {
       if (path === '/api/jobs/job-1') return jsonResponse(completed)
       if (path === '/api/jobs/job-1/copy') return jsonResponse({ ok: true })
@@ -265,7 +265,15 @@ describe('App', () => {
     render(App)
 
     await fireEvent.click(await screen.findByRole('button', { name: '압축 결과 복사' }))
-    expect(screen.getByRole('status')).toHaveTextContent('영상 원고가 완성되었습니다')
+    expect(screen.getByRole('textbox', { name: '압축 결과' }).closest('article')).not.toBeNull()
+    if (state === 'failed') {
+      expect(screen.getByRole('alert')).toHaveTextContent('응답 검증 실패: 분량 미달')
+      expect(screen.getByRole('alert').closest('.progress-column')).not.toBeNull()
+      expect(screen.getByText('검증 실패 대본')).toBeInTheDocument()
+      expect(screen.queryByText('최종 5줄 영상 대본')).not.toBeInTheDocument()
+    } else {
+      expect(screen.getByRole('status')).toHaveTextContent('영상 원고가 완성되었습니다')
+    }
     await screen.findByText('압축 결과를 클립보드에 복사했습니다.')
     await fireEvent.click(screen.getByRole('button', { name: '압축 결과 다운로드' }))
 

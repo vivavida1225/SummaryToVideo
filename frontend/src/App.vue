@@ -228,10 +228,15 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
     const href = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = href
-    link.download = name
+    const dateParts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Seoul', year: '2-digit', month: '2-digit', day: '2-digit',
+    }).formatToParts(new Date(job.value.created_at))
+    const date = ['year', 'month', 'day'].map((part) => dateParts.find((item) => item.type === part)!.value).join('')
+    const downloadName = `${date}_${stage === 'serialized' ? '원본데이터' : '대본'}.txt`
+    link.download = downloadName
     link.click()
     URL.revokeObjectURL(href)
-    announcement.value = `${name} 다운로드를 시작했습니다.`
+    announcement.value = `${downloadName} 다운로드를 시작했습니다.`
   } catch (error) {
     pageError.value = friendlyError(error)
   } finally {
@@ -394,7 +399,7 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
           />
           <ResultPanel
             v-if="job.compressed"
-            title="최종 5줄 영상 대본"
+            :title="job.state === 'failed' ? '검증 실패 대본' : '최종 5줄 영상 대본'"
             eyebrow="COMPRESSED"
             :value="job.compressed"
             label="압축 결과"

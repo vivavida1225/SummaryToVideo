@@ -2,7 +2,8 @@
 param(
     [switch]$NoBrowser,
     [switch]$NoDialog,
-    [switch]$Stop
+    [switch]$Stop,
+    [switch]$InstallOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -670,7 +671,21 @@ try {
     if (-not $ownsMutex) {
         throw '다른 시작/종료 작업이 끝나기를 기다리는 시간이 초과되었습니다.'
     }
-    if ($Stop) {
+    if ($Stop -and $InstallOnly) {
+        throw 'Stop과 InstallOnly는 함께 사용할 수 없습니다.'
+    }
+    if ($InstallOnly) {
+        Write-Output 'Python 런타임과 가상 환경, 필수 패키지를 확인합니다...'
+        $installedPython = Ensure-PythonEnvironment
+        Write-Output "Python 준비 완료: $installedPython"
+        Write-Output 'Node.js와 프런트엔드 패키지, 빌드를 확인합니다...'
+        $installedNode = Ensure-ProjectNode
+        Ensure-Frontend $installedNode
+        Write-Output "Node.js 준비 완료: $installedNode"
+        Write-LauncherLog '의존성 설치/확인 완료 (설치 전용 모드)'
+        Write-Output '설치가 완료되었습니다. start.cmd로 앱을 실행하세요.'
+    }
+    elseif ($Stop) {
         Stop-AppServer
     }
     else {

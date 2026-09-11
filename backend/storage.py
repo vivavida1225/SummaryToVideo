@@ -4,6 +4,7 @@ import uuid
 from pathlib import Path
 
 from .config import MAX_INPUT_BYTES
+from .narration import decode_response
 
 
 JOB_ID = re.compile(r'\d{8}_\d{6}_\d{6}_[0-9a-f]{8}')
@@ -65,7 +66,7 @@ class ResultStore:
         return path
 
     def write_text(self, job_id: str, name: str, text: str):
-        if not re.fullmatch(r'(?:serialized|compressed|invalid_response_[1-3])\.txt|metadata\.json', name):
+        if not re.fullmatch(r'(?:serialized|compressed|(?:invalid|raw)_response_[1-3])\.txt|metadata\.json', name):
             raise ValueError('허용되지 않은 결과 파일입니다.')
         folder = self.directory(job_id)
         folder.mkdir(parents=True, exist_ok=True)
@@ -94,6 +95,17 @@ class ResultStore:
             if not path.resolve().is_relative_to(folder):
                 raise ValueError('결과 경로를 확인하세요.')
             job[stage] = path.read_text(encoding='utf-8') if path.exists() else None
+        if (job['state'] == 'failed' and not job['compressed']
+                and (job.get('error') or '').startswith('응답 검증 실패:')):
+            # Expose the latest saved draft from older runs without converting files.
+            for attempt in (3, 2, 1):
+                path = folder / f'invalid_response_{attempt}.txt'
+                if not path.resolve().is_relative_to(folder):
+                    raise ValueError('결과 경로를 확인하세요.')
+                if path.exists():
+                    job['compressed'] = decode_response(path.read_text(encoding='utf-8'))[0]
+                    job['body_char_count'] = len(job['compressed'].replace('\r\n', '\n').replace('\n', ''))
+                    break
         if job['state'] not in ('completed', 'failed'):
             job['state'] = 'failed'
             job['error'] = '서버 종료로 작업이 중단되었습니다. 보관된 직렬화 결과로 다시 시도하세요.'

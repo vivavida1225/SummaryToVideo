@@ -8,8 +8,10 @@ from backend.gemini import GeminiTransport, ProviderError
 
 
 def install_response(monkeypatch, response):
+    requests = []
     class FakeModels:
         async def generate_content(self, **_kwargs):
+            requests.append(_kwargs)
             if isinstance(response, Exception):
                 raise response
             return response
@@ -26,6 +28,7 @@ def install_response(monkeypatch, response):
         assert kwargs['http_options'].async_client_args['verify'].check_hostname
         return SimpleNamespace(aio=FakeAsyncClient())
     monkeypatch.setattr('backend.gemini.genai.Client', client)
+    return requests
 
 
 def call():
@@ -61,3 +64,17 @@ def test_sdk_empty_response_is_retryable(monkeypatch):
     with pytest.raises(ProviderError) as exc:
         call()
     assert exc.value.retryable
+
+
+def test_repair_request_preserves_conversation_roles(monkeypatch):
+    requests = install_response(monkeypatch, SimpleNamespace(text='fixed', candidates=[], prompt_feedback=None))
+    response = asyncio.run(GeminiTransport().generate(
+        key='test-secret', model='model', prompt='full contract', source='original source',
+        feedback='current error and five-line repair rules', previous_response='previous draft', timeout=60))
+    assert response == 'fixed'
+    contents = requests[0]['contents']
+    assert [item.role for item in contents] == ['user', 'model', 'user']
+    assert contents[0].parts[0].text == 'original source'
+    assert contents[1].parts[0].text == 'previous draft'
+    assert 'current error and five-line repair rules' in contents[2].parts[0].text
+    assert requests[0]['config'].system_instruction == 'full contract'

@@ -52,9 +52,86 @@ def test_one_format_repair_within_same_call_budget(tmp_path, serialized, compres
     assert transport.calls[1]['key'] == 'secret-a'
 
 
+def test_scene_separator_decodes_without_another_call(tmp_path, serialized, compressed):
+    raw = compressed.replace('\n', '<SCENE_BREAK>')
+    result, transport, _, _, invalid = execute(tmp_path, serialized, [raw])
+    assert result.text == compressed
+    assert len(transport.calls) == 1 and not invalid
+    assert result.body_char_count == len(compressed.replace('\n', ''))
+
+
+@pytest.mark.parametrize('separator', ['<SCENE_BREAK>', '\n<SCENE_BREAK>\n'])
+def test_separator_repair_keeps_raw_draft_but_counts_decoded_text(tmp_path, serialized, compressed, separator):
+    raw = separator.join(compressed.splitlines()[:4])
+    result, transport, _, _, _ = execute(tmp_path, serialized, [raw, compressed])
+    assert result.text == compressed
+    assert transport.calls[1]['previous_response'] == raw
+    assert '구분자' in transport.calls[1]['feedback']
+
+
+def test_empty_scene_cannot_be_hidden_by_normalization(tmp_path, serialized, compressed):
+    raw = '<SCENE_BREAK>'.join([compressed.splitlines()[0], '', *compressed.splitlines()[2:]])
+    with pytest.raises(CompressionError, match='빈 장면'):
+        execute(tmp_path, serialized, [raw, raw])
+
+
+def test_failed_delimited_draft_is_decoded_for_display(tmp_path, serialized):
+    raw = '<SCENE_BREAK>'.join(['짧은 장면입니다.'] * 5)
+    with pytest.raises(CompressionError) as caught:
+        execute(tmp_path, serialized, [raw, raw])
+    assert caught.value.response == raw.replace('<SCENE_BREAK>', '\n')
+
+
+@pytest.mark.parametrize('raw', [
+    '<SCENE_BREAK>'.join(['본문입니다.'] * 6),
+    '<SCENE_BREAK>'.join(['본문입니다.\n다른 문장입니다.'] * 5),
+])
+def test_invalid_boundaries_are_never_guessed(tmp_path, serialized, raw):
+    with pytest.raises(CompressionError):
+        execute(tmp_path, serialized, [raw, raw])
+
+
+def test_short_response_triggers_repair_with_original_draft_and_counts(tmp_path, serialized, compressed):
+    lines = compressed.splitlines()
+    lines[1:4] = ['유가가 부담입니다.', '반도체가 강했습니다.', '외국인이 매도했습니다.']
+    short = '\n'.join(lines)
+    result, transport, _, _, invalid = execute(tmp_path, serialized, [short, compressed])
+    assert result.text == compressed
+    assert invalid == [short]
+    assert len(transport.calls) == 2
+    assert transport.calls[1]['previous_response'] == short
+    assert str(sum(map(len, lines))) in transport.calls[1]['feedback']
+    assert '490~550' in transport.calls[1]['feedback']
+    assert transport.calls[1]['source'] == serialized
+
+
+def test_one_line_repair_keeps_source_and_entire_previous_answer(tmp_path, serialized, compressed):
+    flat = compressed.replace('\n', ' ')
+    result, transport, _, _, invalid = execute(tmp_path, serialized, [flat, compressed])
+    assert result.text == compressed
+    assert invalid == [flat]
+    assert transport.calls[1]['previous_response'] == flat
+    assert '5줄' in transport.calls[1]['feedback']
+
+
 def test_second_invalid_response_stops_even_with_attempt_remaining(tmp_path, serialized):
     with pytest.raises(CompressionError, match='검증'):
         execute(tmp_path, serialized, ['bad', 'bad', 'must not reach'])
+
+
+def test_repair_reports_independent_violations_together(tmp_path, serialized, compressed):
+    bad = compressed.replace('835.97', '835.98').splitlines()[0] + '\n누락입니다.'
+    _, transport, _, _, _ = execute(tmp_path, serialized, [bad, compressed])
+    feedback = transport.calls[1]['feedback']
+    for expected in ('5줄', '종료 인사', '코스닥 최종 지수', '부족합니다'):
+        assert expected in feedback
+
+
+def test_final_validation_failure_carries_exact_last_response(tmp_path, serialized):
+    last = '  final invalid draft\n\n'
+    with pytest.raises(CompressionError) as caught:
+        execute(tmp_path, serialized, ['bad', last])
+    assert caught.value.response == last
 
 
 def test_three_transient_failures_stop(tmp_path, serialized):

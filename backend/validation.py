@@ -10,17 +10,22 @@ from decimal import Decimal
 
 INTRO = '오늘의 AI 시황입니다.'
 OUTRO = '오늘의 AI 시황이었습니다.'
+MIN_CHARS = 490
+MAX_CHARS = 550
+TARGET_CHARS = 500
 NUMBER = r'[+\-−]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?'
 NUMBER_TOKEN = re.compile(rf'(?<![\d.,+\-−])({NUMBER})(?!\d|[.,]\d)')
 RATE_UNIT = re.compile(r'^\s*(?:%|퍼센트)')
 # A dot between two digits belongs to a decimal, not a sentence boundary.
 SENTENCE_END = re.compile(r'(?<!\d)\.|\.(?!\d)')
-UP = re.compile(r'상승|오른|올랐|올라|오르|강세')
-DOWN = re.compile(r'하락|내린|내렸|내려|내리|약세|떨어|떨었')
+UP = re.compile(r'상승|급등|폭등|반등|오른|올랐|올라|오르|오름|강세')
+DOWN = re.compile(r'하락|급락|폭락|내린|내렸|내려|내리|내림|약세|떨어|떨었')
 
 
 class ValidationError(ValueError):
-    pass
+    def __init__(self, issues: str | list[str]):
+        self.issues = [issues] if isinstance(issues, str) else issues
+        super().__init__('\n'.join(self.issues))
 
 
 @dataclass
@@ -76,7 +81,8 @@ Ambiguous/unsupported prose is returned to the model for repair, not rewritten.
     return levels[0] if len(levels) == 1 else None
 
 
-def _validate_indices(first_line: str, serialized: str) -> None:
+def _validate_indices(first_line: str, serialized: str) -> list[str]:
+    issues = []
     expected = index_triples(serialized)
     # Stop at every market name, including repeated references to the same market.
     names = list(re.finditer('코스피|코스닥', first_line))
@@ -98,18 +104,23 @@ def _validate_indices(first_line: str, serialized: str) -> None:
             if quoted is not None and _number(quoted[1]) == _number(close):
                 candidates.append((clause, quoted, numbers))
             elif quoted is not None:
-                raise ValidationError(f'장면 1: {name} 최종 지수가 입력의 {close}와 다릅니다.')
+                issues.append(f'장면 1: {name} 최종 지수가 입력의 {close}와 다릅니다.')
+                candidates.append((clause, quoted, numbers))
         if len(candidates) != 1:
-            raise ValidationError(f'장면 1: {name} 최종 지수 {close}를 해당 시장의 서술 안에 정확히 표시하세요.')
+            issues.append(f'장면 1: {name} 최종 지수 {close}를 해당 시장의 서술 안에 정확히 표시하세요.')
+            continue
         clause, close_match, numbers = candidates[0]
         rates = [m for m in numbers if RATE_UNIT.match(clause[m.end():])]
         if not rates:
             closing = clause[close_match.end():]
             if rate == 0 and '보합' in closing and _directions(closing) <= {direction}:
                 continue
-            raise ValidationError(f'장면 1: {name} 등락률 {rate}%와 방향이 필요합니다 (0.00%는 보합 허용).')
+            issues.append(f'장면 1: {name} 등락률 {rate}%와 방향이 필요합니다 (0.00%는 보합 허용).')
+            continue
         if len(rates) != 1 or abs(_number(rates[0][1])) != rate:
-            raise ValidationError(f'장면 1: {name} 등락률을 입력의 {rate}%와 일치시키세요.')
+            issues.append(f'장면 1: {name} 등락률을 입력의 {rate}%와 일치시키세요.')
+            if len(rates) != 1:
+                continue
         match = rates[0]
         signed_direction = -1 if match[1].startswith(('-', '−')) else 1 if match[1].startswith('+') else None
         # Read the rate's own predicate, excluding a later intraday transition.
@@ -128,32 +139,41 @@ def _validate_indices(first_line: str, serialized: str) -> None:
         if (signed_direction is not None and rate != 0 and signed_direction != direction
                 or directions and directions != {direction}
                 or rate != 0 and (not directions or '보합' in predicate)):
-            raise ValidationError(f'장면 1: {name} 등락 방향이 입력과 다르거나 불명확합니다.')
+            issues.append(f'장면 1: {name} 등락 방향이 입력과 다르거나 불명확합니다.')
+    return issues
 
 
 def validate_compressed(response: str, serialized: str) -> ValidatedText:
+    index_triples(serialized)  # Invalid source cannot be repaired by rewriting the response.
+    issues = []
     body = response.replace('\r\n', '\n').strip()
     lines = body.split('\n')
     if len(lines) != 5 or any(not line.strip() for line in lines):
-        raise ValidationError('빈 줄 없이 정확히 5줄인 일반 텍스트 대본이 필요합니다.')
-    if not lines[0].startswith(INTRO + ' ') or not lines[4].endswith(' ' + OUTRO):
-        raise ValidationError('첫 줄 시작 인사와 마지막 줄 종료 인사를 본문과 같은 줄에 표시하세요.')
+        issues.append('빈 줄 없이 정확히 5줄인 일반 텍스트 대본이 필요합니다.')
+    if not lines[0].startswith(INTRO + ' ') or not lines[-1].endswith(' ' + OUTRO):
+        issues.append('첫 줄 시작 인사와 마지막 줄 종료 인사를 본문과 같은 줄에 표시하세요.')
     if body.count(INTRO) != 1 or body.count(OUTRO) != 1:
-        raise ValidationError('시작·종료 인사는 지정된 위치에 한 번씩만 허용됩니다.')
+        issues.append('시작·종료 인사는 지정된 위치에 한 번씩만 허용됩니다.')
     for i, line in enumerate(lines, 1):
-        content = line.removeprefix(INTRO + ' ') if i == 1 else line.removesuffix(' ' + OUTRO) if i == 5 else line
+        # Strip only fixed greetings; never count decimal dots as sentences.
+        content = line.replace(INTRO, '').replace(OUTRO, '').strip()
         if line != line.strip() or re.search(r'[<>`#*|\r\t]|={3,}|^\s*(?:[·•\-+]\s|\d+[.)]\s|장면\s*\d+\s*[:=])|\[[^\]]+\]', content):
-            raise ValidationError(f'장면 {i}: 번호·제목·Markdown 장식과 바깥쪽 공백을 제거하세요.')
+            issues.append(f'장면 {i}: 번호·제목·Markdown 장식과 바깥쪽 공백을 제거하세요.')
         parts = SENTENCE_END.split(content)
         if not content.endswith('.') or parts[-1] != '' or not 1 <= len(parts) - 1 <= 2 or any(not p.strip() for p in parts[:-1]):
-            raise ValidationError(f'장면 {i}: 인사말을 제외한 본문은 마침표로 끝나는 1~2문장이어야 합니다.')
+            issues.append(f'장면 {i}: 인사말을 제외한 본문은 마침표로 끝나는 1~2문장이어야 합니다.')
         if re.search(r'[!?。！？]', content):
-            raise ValidationError(f'장면 {i}: 본문 문장은 마침표로 끝내세요.')
-    _validate_indices(lines[0], serialized)
+            issues.append(f'장면 {i}: 본문 문장은 마침표로 끝내세요.')
+    issues.extend(_validate_indices(lines[0], serialized))
     chars = sum(map(len, lines))
-    if chars > 650:
-        raise ValidationError(f'전체 대본이 650자를 초과합니다 (현재 {chars}자, 인사말·숫자 포함).')
-    warnings = []
-    if not 400 <= chars <= 550:
-        warnings.append(f'대본 {chars}자: 권장 분량은 400~550자입니다 (인사말·숫자 포함, 개행 제외).')
-    return ValidatedText(body, chars, warnings)
+    if chars < MIN_CHARS:
+        issues.append(f'전체 대본은 {MIN_CHARS}~{MAX_CHARS}자여야 합니다. 현재 {chars}자로 '
+                              f'{MIN_CHARS - chars}자 부족합니다. 원문의 근거와 시장 영향을 보충하세요 '
+                              '(인사말·숫자·공백 포함, 개행 제외).')
+    if chars > MAX_CHARS:
+        issues.append(f'전체 대본은 {MIN_CHARS}~{MAX_CHARS}자여야 합니다. 현재 {chars}자로 '
+                              f'{chars - MAX_CHARS}자 초과합니다. 중복과 세부 정보를 줄이세요 '
+                              '(인사말·숫자·공백 포함, 개행 제외).')
+    if issues:
+        raise ValidationError(issues)
+    return ValidatedText(body, chars, [])

@@ -42,7 +42,7 @@ def _retry_after(exc: errors.APIError) -> float | None:
 
 class GeminiTransport:
     async def generate(self, *, key: str, model: str, prompt: str, source: str,
-                       feedback: str, timeout: float) -> str:
+                       feedback: str, timeout: float, previous_response: str = '') -> str:
         try:
             async with genai.Client(
                 api_key=key,
@@ -53,7 +53,10 @@ class GeminiTransport:
             ).aio as client:
                 contents = source
                 if feedback:
-                    contents += '\n\n[이전 응답 검증 오류 — 원문을 기준으로 다시 작성]\n' + feedback
+                    contents = [types.Content(role='user', parts=[types.Part(text=source)])]
+                    if previous_response:
+                        contents.append(types.Content(role='model', parts=[types.Part(text=previous_response)]))
+                    contents.append(types.Content(role='user', parts=[types.Part(text=feedback)]))
                 result = await client.models.generate_content(
                     model=model,
                     contents=contents,

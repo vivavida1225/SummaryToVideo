@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone
 
 from .clipboard import WindowsClipboard
-from .compression import CompressionError, Compressor
+from .compression import CompressionError, Compressor, ResponseValidationError
 from .config import Settings
 from .serializer import serialize_html
 from .storage import ResultStore, read_source
@@ -117,7 +117,8 @@ class JobManager:
             compressor = self.compressor_factory()
             result = await compressor.run(serialized,
                 lambda state, **fields: self._event(job_id, state, **fields),
-                lambda attempt, raw: self.store.write_text(job_id, f'invalid_response_{attempt}.txt', raw))
+                lambda attempt, raw: self.store.write_text(job_id, f'invalid_response_{attempt}.txt', raw),
+                save_raw=lambda attempt, raw: self.store.write_text(job_id, f'raw_response_{attempt}.txt', raw))
             job.update(compressed=result.text, body_char_count=result.body_char_count)
             job['warnings'].extend(result.warnings)
             self.store.write_text(job_id, 'compressed.txt', result.text)
@@ -125,6 +126,14 @@ class JobManager:
             self._event(job_id, 'completed', retry_at=None, message='1분 압축이 완료되었습니다.')
         except asyncio.CancelledError:
             job.update(state='failed', error='서버 종료로 작업이 중단되었습니다.', retry_at=None)
+        except ResponseValidationError as exc:
+            job.update(state='failed', error=self.settings.redact(str(exc)), retry_at=None,
+                       compressed=exc.response,
+                       body_char_count=len(exc.response.replace('\r\n', '\n').replace('\n', '')))
+            try:
+                self.store.write_text(job_id, 'compressed.txt', exc.response)
+            except OSError:
+                job['warnings'].append('대본 파일 저장에 실패했습니다. 화면에서 복사하거나 다운로드하세요.')
         except OSError:
             job.update(state='failed', error='파일을 읽거나 저장하지 못했습니다. 경로, 쓰기 권한, 디스크 공간을 확인하세요.', retry_at=None)
         except (ValueError, CompressionError) as exc:
