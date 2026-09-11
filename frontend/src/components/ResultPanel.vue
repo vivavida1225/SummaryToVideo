@@ -19,7 +19,7 @@ defineEmits<{ copy: []; download: [] }>()
         <p class="eyebrow">{{ eyebrow }}</p>
         <h3>{{ title }}</h3>
       </div>
-      <span class="char-count">{{ value.length.toLocaleString('ko-KR') }}자</span>
+      <span class="char-count" title="개행 제외">{{ Array.from(value.replace(/[\r\n]/g, '')).length.toLocaleString('ko-KR') }}자</span>
     </header>
     <label class="sr-only">{{ label }}</label>
     <textarea :aria-label="label" :value="value" readonly spellcheck="false" />

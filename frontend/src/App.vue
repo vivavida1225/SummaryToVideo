@@ -369,7 +369,7 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
             <h2 id="results-heading">작업 결과</h2>
           </div>
           <div v-if="job.state === 'completed'" class="result-stats">
-            <span v-if="job.scene_count !== null">입력 {{ job.scene_count }}개 → 최종 5개 장면</span>
+            <span v-if="job.scene_count !== null">입력 {{ job.scene_count }}개 → 최종 5줄 대본</span>
             <span v-if="job.body_char_count !== null">본문 {{ job.body_char_count.toLocaleString('ko-KR') }}자</span>
             <span>{{ job.elapsed_seconds.toFixed(1) }}초 소요</span>
           </div>
@@ -394,7 +394,7 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
           />
           <ResultPanel
             v-if="job.compressed"
-            title="다섯 장면 영상 원고"
+            title="최종 5줄 영상 대본"
             eyebrow="COMPRESSED"
             :value="job.compressed"
             label="압축 결과"

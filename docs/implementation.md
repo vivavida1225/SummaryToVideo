@@ -1,6 +1,6 @@
 # Local market compressor — implementation contract
 
-Approved scope: Vue3/TypeScript/Vite + Python/FastAPI on Windows. Clipboard HTML is default; no default file, no automatic API call on page load. One explicit run serializes HTML, saves and copies it, then compresses with gemini-3.5-flash-lite, validates, saves and copies final text. Numbered keys from existing .env rotate on recoverable failures. Three calls total, 60 seconds/call, 300 seconds overall, 2/4-second retry waits (server hints take precedence). Invalid format gets at most one repair within that budget. Outputs are plain UTF-8 text with === separators, isolated per run.
+Approved scope: Vue3/TypeScript/Vite + Python/FastAPI on Windows. Clipboard HTML is default; no default file, no automatic API call on page load. One explicit run serializes HTML, saves and copies it, then compresses with gemini-3.5-flash-lite, validates, saves and copies final text. Numbered keys from existing .env rotate on recoverable failures. Three calls total, 60 seconds/call, 300 seconds overall, 2/4-second retry waits (server hints take precedence). Invalid format gets at most one repair within that budget. Serialized input uses === separators; compressed output is a five-line plain-text narration, isolated per run.
 
 ## Shared HTTP contract
 
@@ -26,10 +26,13 @@ Approved scope: Vue3/TypeScript/Vite + Python/FastAPI on Windows. Clipboard HTML
 
 ## Decisions
 
-- Existing user .env and src inputs stay intact. Existing compression prompt is read each request; normalize separator examples in memory, append deterministic output contract; preserve source prompt.
+- Existing user .env and src inputs stay intact. The compression prompt is read each request and a five-line narration output contract is appended. No separator example normalization is performed.
 - Files only inside resolved src; outputs inside unique outputs/run_id. Reject symlink/junction escapes and oversized inputs (5 MiB).
 - Clipboard win32 implementation supports Unicode text and CF_HTML, with bounded contention retries. Text with literal news HTML takes precedence over rich text.
 - Script-only whitespace trims at text boundaries; internal line breaks become spaces (block elements separated), inline node text concatenated without invented spaces. Ambiguous structure fails instead of producing partial content.
-- Exactly 5 compressed scenes, first scene has title, one description, blank line, original KOSPI/KOSDAQ triples. Scenes 2..5 title + one description line. One blank line only before first index. 45/70 description limits exclude first-scene bullet prefix; count title + description incl spaces/punctuation excluding markers/newlines/index block. Preserve index triples verbatim. Title 25 and total 400..550 are warnings; 650 hard maximum.
+- Exactly 5 nonempty narration lines, with no fences, headings, numbering or separators. Each line contains 1..2 period-terminated body sentences; decimal points are not sentence boundaries. Fixed opening/closing greetings on lines 1/5 are excluded from sentence counts (2..3 total sentences on those lines). Only outer whitespace and CRLF are normalized; the validator never merges, splits or rewrites narration.
+- Line roles: market result/intraday path; strongest external variable; leading sectors/flows; investor flows/risks; market definition/next-session checks. The prompt selects three concrete takeaways and forbids unsupported facts or stronger causal claims. These semantic requirements are reviewed separately from deterministic validation.
+- First-line KOSPI/KOSDAQ clauses must contain the matching final index, percentage and direction from the input. Thousands separators may differ; percentages accept % or 퍼센트; a 0.00% change may be described as 보합. Percentage direction is checked against the input point change, including unsigned percentages. Explicit closing quotes take priority over intraday quotes. Ambiguous prose triggers the existing repair request. Index triples remain mandatory in serialized input.
+- body_char_count counts all Unicode code points including greetings/numbers/spaces/punctuation, excluding line endings. 400..550 is advisory and 650 is a hard maximum. scene_count still means input scene count. HTTP types and artifact names are unchanged. Old stored results are loaded/copied/downloaded as-is without revalidation or migration.
 - Only one active job. Explicit manual retry creates new run from original serialized snapshot; no prompt/clipboard reread of source data. Startup must not overwrite clipboard.
 - Work in existing requested folder: no Git repository/CLI exists, so worktree and commit workflows do not apply.

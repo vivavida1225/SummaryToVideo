@@ -53,6 +53,11 @@ def test_automatic_save_copy_and_compression_order(tmp_path, tiny_html, compress
         assert (folder / 'serialized.txt').read_text(encoding='utf-8') == job['serialized']
         assert (folder / 'compressed.txt').read_text(encoding='utf-8') == job['compressed']
         assert json.loads((folder / 'metadata.json').read_text(encoding='utf-8'))['state'] == 'completed'
+        restored = JobManager(manager.settings, clipboard=clipboard)
+        assert restored.get(job['id'])['compressed'] == compressed
+        assert restored.artifact(job['id'], 'compressed.txt') == compressed
+        await restored.copy_result(job['id'], 'compressed')
+        assert clipboard.writes[-1] == compressed
     asyncio.run(scenario())
 
 

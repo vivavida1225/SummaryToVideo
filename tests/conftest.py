@@ -27,4 +27,4 @@ def serialized():
 
 @pytest.fixture
 def compressed():
-    return '```text\n<1>코스피 보합·코스닥 상승\n· 코스피는 보합, 코스닥은 강세로 마감\n\n코스피\n7,051.61\n-0.03 (0.00%)\n코스닥\n835.97\n+5.60 (0.67%)\n===\n<2>반도체의 상대 강세\nAI 수요 기대가 반도체 강세를 지지\n===\n<3>엇갈린 수급\n외국인은 매도하고 반도체로 자금이 집중\n===\n<4>남아 있는 유가 부담\n유가 상승과 수급 편중이 변동성을 높임\n===\n<5>주도주의 힘이 갈린 장\n반도체 강세 속 유가와 외국인 수급을 주시\n```'
+    return (ROOT / 'tests/fixtures/narration.txt').read_text(encoding='utf-8').strip()

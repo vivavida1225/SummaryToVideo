@@ -37,7 +37,7 @@ def execute(tmp_path, serialized, answers, keys=None, **options):
 def test_rotates_keys_on_429_and_server_error(tmp_path, serialized, compressed):
     result, transport, events, sleeps, _ = execute(tmp_path, serialized,
         [ProviderError('호출 한도', retryable=True, retry_after=9), ProviderError('서버 오류', retryable=True), compressed])
-    assert result.text.startswith('<1>')
+    assert result.text.startswith('오늘의 AI 시황입니다.')
     assert [c['key'] for c in transport.calls] == ['secret-a', 'secret-b', 'secret-c']
     assert sleeps == [9, 4]
     assert [f['attempt'] for s, f in events if s == 'requesting'] == [1, 2, 3]
@@ -92,5 +92,5 @@ def test_unresponsive_transport_times_out_and_rotates(tmp_path, serialized, comp
         pass
     runner = Compressor(prompt, [(1, 'a'), (2, 'b')], transport=transport, sleep=no_wait, request_timeout=0.02)
     result = asyncio.run(runner.run(serialized, lambda *a, **k: None, lambda *a: None))
-    assert result.text.startswith('<1>')
+    assert result.text.startswith('오늘의 AI 시황입니다.')
     assert [c['key'] for c in transport.calls] == ['a', 'b']

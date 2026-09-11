@@ -6,10 +6,10 @@ Plan approved in conversation. Worktree inapplicable: directory is not a Git rep
 | --- | --- | --- |
 | Backend / frontend | HTTP contract in implementation.md | Fixed before implementation |
 | Backend / launcher | server CLI + health/session/shutdown + .runtime/server.json | Fixed before implementation |
-| Serializer / compressor | raw scene text, preserved index triples | Original prompt conflicts resolved to === |
+| Serializer / compressor | serialized scene input → five-line narration | Per-market index/rate checks and greeting-aware sentence limits |
 
-- Backend: complete; 56 tests across serializer, validation, retries, SDK boundary, storage/clipboard, jobs and API. Five review findings fixed with regression tests.
-- Frontend: complete; 11 tests, typecheck/build and actual Edge browser checks pass. Independent review accepted after recovery/accessibility fixes.
+- Backend: complete; 95 tests across serializer, narration validation, retries, SDK boundary, storage/clipboard, jobs and API. Narration review findings fixed with regression tests; old archives remain readable.
+- Frontend: complete; 12 tests, typecheck/build and actual Edge browser checks pass. Five-line narration display and newline-excluded character counts verified.
 - Launcher: complete; lifecycle, port collision, duplicate reuse, warm-start freshness and Korean/spaced-path checks passed.
 - Integration: actual Gemini, native clipboard and Edge browser checks passed. Backend, frontend and final application reviews accepted with no open actionable findings.
 
@@ -17,4 +17,4 @@ Ruling: The machine Python executable moved mid-run from the per-user install to
 
 Ruling: certifi failed on the environment's trusted interception chain; ssl.create_default_context also rejected its missing Authority Key Identifier. Native Windows truststore validates the chain successfully; use truststore SSLContext with CERT_REQUIRED and hostname verification, never disable verification.
 
-Live integration: outputs/20260911_093218_597402_2767fafc completed with gemini-3.5-flash-lite, two calls (one format repair), validated 5 scenes, final clipboard verified equal to compressed.txt. Original first integration failed at TLS and remains archived separately.
+Latest narration integration: outputs/20260911_135153_351794_a3a37a55 completed with gemini-3.5-flash-lite on the first call, five narration lines, final clipboard verified equal to compressed.txt. The 378-character sample gives an advisory length warning and measures 61.53 seconds with Korean Heami speech at default rate. Sparse mixed-flow input was also evaluated. Detailed evidence and historical integration records are in docs/verification.md.

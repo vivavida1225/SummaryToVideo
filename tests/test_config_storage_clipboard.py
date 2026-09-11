@@ -67,3 +67,15 @@ def test_output_run_junction_cannot_redirect_to_another_run(tmp_path):
             link.rmdir()
         else:
             link.unlink()
+
+
+def test_legacy_archived_result_loads_without_narration_revalidation(tmp_path):
+    store = ResultStore(tmp_path)
+    job_id = '20260911_123000_000000_1234abcd'
+    legacy = '<1>기존 장면\n설명\n===\n<2>기존 다음 장면'
+    store.metadata({'id': job_id, 'state': 'completed', 'body_char_count': 25})
+    store.write_text(job_id, 'serialized.txt', '기존 입력')
+    store.write_text(job_id, 'compressed.txt', legacy)
+    job = store.load(job_id)
+    assert job['compressed'] == legacy
+    assert job['body_char_count'] == 25

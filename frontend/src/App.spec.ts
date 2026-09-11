@@ -163,7 +163,7 @@ describe('App', () => {
     const completed = makeJob({
       state: 'completed',
       serialized: '장 마감 원문',
-      compressed: '===\n첫 장면\n===\n둘째 장면',
+      compressed: '첫 장면입니다.\n둘째 장면입니다.\n셋째 장면입니다.\n넷째 장면입니다.\n마지막 장면입니다.',
       scene_count: 6,
       body_char_count: 472,
       elapsed_seconds: 4.2,
@@ -193,7 +193,7 @@ describe('App', () => {
 
     await waitFor(() => expect(polls).toBe(1), { timeout: 2000 })
     expect(await screen.findByRole('textbox', { name: '압축 결과' })).toHaveValue(completed.compressed)
-    expect(screen.getByText('입력 6개 → 최종 5개 장면')).toBeInTheDocument()
+    expect(screen.getByText('입력 6개 → 최종 5줄 대본')).toBeInTheDocument()
     expect(sessionStorage.getItem('market-compressor.job-id')).toBe('job-1')
   })
 

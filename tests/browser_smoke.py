@@ -28,7 +28,7 @@ def main():
         page.evaluate('(id) => sessionStorage.setItem("market-compressor.job-id", id)', live['id'])
         page.reload(wait_until='networkidle')
         expect(page.get_by_role('textbox', name='압축 결과', exact=True)).to_have_value(live['compressed'])
-        expect(page.get_by_text('입력 6개 → 최종 5개 장면')).to_be_visible()
+        expect(page.get_by_text('입력 6개 → 최종 5줄 대본')).to_be_visible()
         with page.expect_download() as downloaded:
             page.get_by_role('button', name='압축 결과 다운로드').click()
         assert Path(downloaded.value.path()).read_text(encoding='utf-8') == live['compressed']
