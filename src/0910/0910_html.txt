@@ -1,0 +1,91 @@
+<div class="embedded-content">
+
+<header>중동발 유가 급등과 반도체&middot;AI 편중 수급으로 장중 변동성 확대
+
+</header>
+
+<div class="summary-box">
+
+<p class="summary">&middot; 오전 장에서는 유가 급등과 외국인&middot;기관 매도로 지수 약세 흐름 전개</p>
+
+<p class="summary">&middot; 오후 장에서는 반도체&middot;AI 중심 ETF 자금 유입으로 코스닥&middot;관련주 강세 전환</p>
+
+<p class="summary">&middot; 장 마감 무렵에는 코스피 혼조 속 코스닥 강세로 마감되며 변동성 소폭 완화</p>
+
+<div class="indices">
+
+<div class="index-card">
+
+<div class="index-name">코스피</div>
+
+<div class="index-value">7051.61</div>
+
+<div class="index-change" style="color:#0047b3">-0.03 (0.00%)</div></div>
+
+<div class="index-card">
+
+<div class="index-name">코스닥</div>
+
+<div class="index-value">835.97</div>
+
+<div class="index-change" style="color:#b00000">+5.60 (0.67%)</div></div></div><section>
+
+<h2>에너지&middot;원자재와 지정학 리스크</h2>
+
+<ul>
+
+<li><span class="key-info">국제유가 브렌트&middot;WTI 급등:</span><span class="key-detail">중동 충돌 우려로 유가 100달러대 재돌파 보도 (잠정&rarr;확정) 유가 상승에 따른 정유&middot;해운&middot;석유화학 업종 수급 강세</span></li>
+
+<li><span class="key-info">정유&middot;해운 업종 반응:</span><span class="key-detail">정유주&middot;해운주에 단기 자금 유입과 거래대금 급증으로 섹터 주도력 부각</span></li>
+
+<li><span class="key-info">물가 및 공급망 파급:</span><span class="key-detail">유가 상승으로 비료&middot;농산물 원가 부담 가능성과 인플레이션 재점화 우려</span></li>
+
+</ul></section><section>
+
+<h2>반도체&middot;AI와 ETF 중심 수급 쏠림</h2>
+
+<ul>
+
+<li><span class="key-info">메모리 업황과 수급 불균형:</span><span class="key-detail">AI 수요 지속과 메모리 공급난 전망으로 삼성전자&middot;SK하이닉스 중심의 수급 편중 심화</span></li>
+
+<li><span class="key-info">ETF와 레버리지 흐름:</span><span class="key-detail">HANARO K-반도체 등 성과 상위 ETF로 자금 유입 관측과 레버리지 투자 확대 경고로 변동성 확대</span></li>
+
+<li><span class="key-info">글로벌 수요 신호:</span><span class="key-detail">TSMC 매출 급증 보도로 AI칩 수요 강세 재확인 및 설비 확대에도 수급 부족 지속 우려</span></li>
+
+</ul></section><section>
+
+<h2>시장수급&middot;금융정책&middot;거시 리스크</h2>
+
+<ul>
+
+<li><span class="key-info">외국인&middot;기관 매매 패턴:</span><span class="key-detail">장중 외국인&middot;기관 동시 순매도와 프로그램 매도 영향으로 코스피 하방 압력 유입</span></li>
+
+<li><span class="key-info">한은의 통화정책 경고:</span><span class="key-detail">명목성장률&middot;레버리지 리스크 지적으로 추가 금리 인상 가능성 논의와 금융당국 점검 강화</span></li>
+
+<li><span class="key-info">환율&middot;채권 영향:</span><span class="key-detail">원/달러 1,330원대 등락과 국채 금리 변동성 확대로 금융시장 리스크 확대</span></li>
+
+</ul></section><section>
+
+<h2>거래 특성 및 장 마감 동향</h2>
+
+<ul>
+
+<li><span class="key-info">코스닥 주도 장세:</span><span class="key-detail">코스닥은 반도체&middot;비금속 업종 중심의 강세로 마감하며 코스피와 상이한 흐름 연출</span></li>
+
+<li><span class="key-info">프로그램&middot;ETF 영향:</span><span class="key-detail">프로그램 순매도와 ETF별 상&middot;하위 교차로 단기 롤러코스터식 변동성 발생</span></li>
+
+<li><span class="key-info">시장발행 이슈 정리:</span><span class="key-detail">오전 중 유가 급등 보도와 반도체 수급 우려는 잠정 보도에서 확정 보도로 통합 정리됨 (잠정&rarr;확정)</span></li>
+
+</ul></section><section>
+
+<h2>신규 뉴스 요약</h2>
+
+<ul>
+
+<li><span class="key-info">신규: 오후 3:21&middot;3:01 매매우위 관측:</span><span class="key-detail">코스닥 매수우위 지표와 운송업 매도강세 보도으로 시간대별 수급 편차 확인</span></li>
+
+<li><span class="key-info">신규: 코스닥 상승률&middot;프로그램 순매도 목록:</span><span class="key-detail">직전 30분 기준 상위 종목 및 프로그램 매도 상위 목록으로 단기 특징주 확인 가능</span></li>
+
+<li><span class="key-info">신규: 거래주체별 매매현황 공개:</span><span class="key-detail">업종별 외국인&middot;기관 매매 금액&middot;수량 집계로 섹터별 수급 강약 판별 유용</span></li>
+
+</ul></section></div></div>
