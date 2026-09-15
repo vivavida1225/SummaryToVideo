@@ -14,6 +14,7 @@ const stateLabel: Record<JobState, string> = {
   validating: '결과 형식을 확인하는 중',
   copying_compressed: '압축 결과를 복사하는 중',
   completed: '영상 원고가 완성되었습니다',
+  needs_review: '분량 확인 필요',
   failed: '작업을 완료하지 못했습니다',
 }
 
@@ -36,12 +37,12 @@ function formatEventTime(value: string) {
       </div>
       <span class="state-badge" :class="`state-${job.state}`">
         <i aria-hidden="true" />
-        {{ job.state === 'completed' ? '완료' : job.state === 'failed' ? '확인 필요' : '진행 중' }}
+        {{ job.state === 'completed' ? '완료' : ['failed', 'needs_review'].includes(job.state) ? '확인 필요' : '진행 중' }}
       </span>
     </div>
 
     <div class="job-meta" aria-label="작업 정보">
-      <span v-if="actualModel">{{ job.state === 'completed' ? '응답 모델' : '호출 모델' }}: {{ actualModel }}</span>
+      <span v-if="actualModel">{{ ['completed', 'needs_review'].includes(job.state) ? '응답 모델' : '호출 모델' }}: {{ actualModel }}</span>
       <span>시도 {{ job.attempt }} / {{ job.max_attempts }}</span>
       <span v-if="job.key_number">API 키 {{ job.key_number }}</span>
       <span>{{ job.elapsed_seconds.toFixed(1) }}초</span>

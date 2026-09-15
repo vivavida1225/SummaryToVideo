@@ -40,13 +40,16 @@ def setup(tmp_path, response, clipboard=None):
     return manager, clipboard, compressor
 
 
-def test_automatic_save_copy_and_compression_order(tmp_path, tiny_html, compressed):
+def test_generation_saves_results_and_only_explicit_copy_writes_clipboard(tmp_path, tiny_html, compressed):
     async def scenario():
         manager, clipboard, compressor = setup(tmp_path, compressed)
         job = manager.start(html=tiny_html)
         await manager.wait(job['id'])
         job = manager.get(job['id'])
         assert job['state'] == 'completed'
+        assert clipboard.writes == []
+        await manager.copy_result(job['id'], 'serialized')
+        await manager.copy_result(job['id'], 'compressed')
         assert clipboard.writes == [job['serialized'], job['compressed']]
         assert compressor.sources == [job['serialized']]
         folder = tmp_path / job['output_dir']
@@ -69,7 +72,7 @@ def test_failure_preserves_serialized_and_retry_uses_snapshot(tmp_path, tiny_htm
         await manager.wait(first['id'])
         first = manager.get(first['id'])
         assert first['state'] == 'failed' and first['serialized']
-        assert clipboard.writes == [first['serialized']]
+        assert clipboard.writes == []
         (tmp_path / 'src/input.txt').write_text('changed after first attempt', encoding='utf-8')
         compressor.response = compressed
         second = manager.retry(first['id'])
@@ -78,17 +81,20 @@ def test_failure_preserves_serialized_and_retry_uses_snapshot(tmp_path, tiny_htm
         assert second['state'] == 'completed'
         assert second['id'] != first['id'] and second['parent_id'] == first['id']
         assert compressor.sources == [first['serialized'], first['serialized']]
+        assert clipboard.writes == []
     asyncio.run(scenario())
 
 
-def test_clipboard_failure_warns_but_still_produces_final_result(tmp_path, tiny_html, compressed):
+def test_unavailable_clipboard_does_not_affect_generation(tmp_path, tiny_html, compressed):
     async def scenario():
         manager, _, _ = setup(tmp_path, compressed, Clipboard(fail=True))
         job = manager.start(html=tiny_html)
         await manager.wait(job['id'])
         result = manager.get(job['id'])
         assert result['state'] == 'completed' and result['compressed']
-        assert any('클립보드' in s for s in result['warnings'])
+        assert not any('클립보드' in s for s in result['warnings'])
+        with pytest.raises(OSError):
+            await manager.copy_result(job['id'], 'compressed')
     asyncio.run(scenario())
 
 
@@ -147,7 +153,7 @@ def test_validation_failure_is_visible_saved_and_manually_copyable(tmp_path, tin
         assert result['state'] == 'failed' and '검증 실패' in result['error']
         assert result['compressed'] == last
         assert result['body_char_count'] == len(last.replace('\n', ''))
-        assert clipboard.writes == [result['serialized']]
+        assert clipboard.writes == []
         restored = JobManager(manager.settings, clipboard=clipboard)
         assert restored.artifact(job['id'], 'compressed.txt') == last
         await restored.copy_result(job['id'], 'compressed')
@@ -214,7 +220,7 @@ def test_transport_exhaustion_preserves_draft_without_auto_copy(tmp_path, tiny_h
         assert result['model'] == 'gemini-3.5-flash-lite'
         assert result['requested_model'] == 'gemini-3.8-flash'
         assert len(result['attempted_models']) == 4 and result['attempt'] == 5
-        assert clipboard.writes == [result['serialized']]
+        assert clipboard.writes == []
         assert (tmp_path / result['output_dir'] / 'raw_response_4.txt').read_text(encoding='utf-8') == 'saved draft'
         restored = JobManager(manager.settings, clipboard=clipboard)
         assert restored.artifact(job['id'], 'compressed.txt') == 'saved draft'

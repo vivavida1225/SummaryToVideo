@@ -1,5 +1,7 @@
 <script setup lang="ts">
-defineProps<{
+import { computed } from 'vue'
+
+const props = defineProps<{
   title: string
   eyebrow: string
   value: string
@@ -7,7 +9,11 @@ defineProps<{
   copyLabel: string
   downloadLabel: string
   busy?: boolean
+  bodyCharCount?: number
+  excessCharCount?: number
 }>()
+
+const charCount = computed(() => props.bodyCharCount ?? Array.from(props.value.replace(/[\r\n]/g, '')).length)
 
 defineEmits<{ copy: []; download: [] }>()
 </script>
@@ -19,7 +25,7 @@ defineEmits<{ copy: []; download: [] }>()
         <p class="eyebrow">{{ eyebrow }}</p>
         <h3>{{ title }}</h3>
       </div>
-      <span class="char-count" title="개행 제외">{{ Array.from(value.replace(/[\r\n]/g, '')).length.toLocaleString('ko-KR') }}자</span>
+      <span class="char-count" title="개행 제외">{{ charCount.toLocaleString('ko-KR') }}자<template v-if="excessCharCount"> · 상한 {{ (charCount - excessCharCount).toLocaleString('ko-KR') }}자보다 {{ excessCharCount.toLocaleString('ko-KR') }}자 초과</template></span>
     </header>
     <label class="sr-only">{{ label }}</label>
     <textarea :aria-label="label" :value="value" readonly spellcheck="false" />

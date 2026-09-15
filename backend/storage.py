@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .config import MAX_INPUT_BYTES
 from .narration import decode_response
+from .validation import count_characters
 
 
 JOB_ID = re.compile(r'\d{8}_\d{6}_\d{6}_[0-9a-f]{8}')
@@ -92,6 +93,8 @@ class ResultStore:
         job = json.loads(metadata_path.read_text(encoding='utf-8'))
         job.setdefault('requested_model', job.get('model'))
         job.setdefault('attempted_models', [])
+        job.setdefault('validation_issues', [])
+        job.setdefault('excess_char_count', 0)
         for stage in ('serialized', 'compressed'):
             path = folder / (stage + '.txt')
             if not path.resolve().is_relative_to(folder):
@@ -106,9 +109,9 @@ class ResultStore:
                     raise ValueError('결과 경로를 확인하세요.')
                 if path.exists():
                     job['compressed'] = decode_response(path.read_text(encoding='utf-8'))[0]
-                    job['body_char_count'] = len(job['compressed'].replace('\r\n', '\n').replace('\n', ''))
+                    job['body_char_count'] = count_characters(job['compressed'])
                     break
-        if job['state'] not in ('completed', 'failed'):
+        if job['state'] not in ('completed', 'failed', 'needs_review'):
             job['state'] = 'failed'
             job['error'] = '서버 종료로 작업이 중단되었습니다. 보관된 직렬화 결과로 다시 시도하세요.'
         return job

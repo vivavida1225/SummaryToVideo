@@ -8,7 +8,7 @@ import type { Job, SessionInfo, SourceFile } from './types'
 
 const JOB_STORAGE_KEY = 'market-compressor.job-id'
 const MODEL_STORAGE_KEY = 'market-compressor.model'
-const TERMINAL_STATES = new Set(['completed', 'failed'])
+const TERMINAL_STATES = new Set(['completed', 'failed', 'needs_review'])
 
 const session = ref<SessionInfo | null>(null)
 const selectedModel = ref('')
@@ -388,6 +388,14 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
             <p>{{ job.error || '작업을 완료하지 못했습니다.' }}</p>
             <button v-if="job.serialized" type="button" :disabled="loading || actionBusy" @click="retryJob">압축 다시 시도</button>
           </div>
+          <div v-if="job?.state === 'needs_review'" class="failure-card review-card" role="alert">
+            <strong>생성된 대본의 분량을 확인하세요</strong>
+            <p>자동 보정을 멈췄습니다. 대본을 확인한 뒤 필요한 경우 재생성을 눌러 주세요.</p>
+            <ul>
+              <li v-for="(issue, index) in job.validation_issues ?? []" :key="index">{{ issue }}</li>
+            </ul>
+            <button v-if="job.serialized && job.compressed" type="button" :disabled="loading || actionBusy" @click="retryJob">대본 재생성</button>
+          </div>
         </aside>
       </div>
 
@@ -423,9 +431,11 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
           />
           <ResultPanel
             v-if="job.compressed"
-            :title="job.state === 'failed' ? '검증 실패 대본' : '최종 5줄 영상 대본'"
+            :title="job.state === 'needs_review' ? '생성된 대본 · 분량 확인 필요' : job.state === 'failed' ? '검증 실패 대본' : '최종 5줄 영상 대본'"
             eyebrow="COMPRESSED"
             :value="job.compressed"
+            :body-char-count="job.body_char_count ?? undefined"
+            :excess-char-count="job.excess_char_count"
             label="압축 결과"
             copy-label="압축 결과 복사"
             download-label="압축 결과 다운로드"

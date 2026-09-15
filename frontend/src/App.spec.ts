@@ -82,6 +82,35 @@ describe('App', () => {
     vi.restoreAllMocks()
   })
 
+  it('초과 대본을 복원하고 명시적 재생성에서만 요청한다', async () => {
+    sessionStorage.setItem('market-compressor.job-id', 'job-1')
+    const review = makeJob({ state: 'needs_review', serialized: '보관된 원문', compressed: '가'.repeat(551),
+      body_char_count: 551, excess_char_count: 1, validation_issues: ['1자 초과', '지수 불일치'] })
+    const fetchMock = installBootstrapFetch((path) => {
+      if (path === '/api/jobs/job-1') return jsonResponse(review)
+      if (path === '/api/jobs/job-1/retry') return jsonResponse(makeJob({ id: 'regenerated' }), 202)
+      if (path === '/api/jobs/job-1/copy') return jsonResponse({ ok: true })
+      return jsonResponse({}, 404)
+    })
+    render(App)
+    expect(await screen.findByText('551자 · 상한 550자보다 1자 초과')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: '압축 결과' })).toHaveValue(review.compressed)
+    expect(screen.getByText('지수 불일치')).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '시작 모델' })).toBeEnabled())
+    await new Promise(resolve => setTimeout(resolve, 1100))
+    expect(fetchMock.mock.calls.filter(([request]) => requestPath(request) === '/api/jobs/job-1')).toHaveLength(1)
+    expect(fetchMock.mock.calls.some(([request]) => requestPath(request).endsWith('/retry'))).toBe(false)
+    await fireEvent.click(screen.getByRole('button', { name: '압축 결과 복사' }))
+    await screen.findByText('압축 결과를 클립보드에 복사했습니다.')
+    await fireEvent.update(screen.getByRole('combobox', { name: '시작 모델' }), 'gemini-3.7-flash')
+    const regenerate = screen.getByRole('button', { name: '대본 재생성' })
+    await fireEvent.click(regenerate)
+    await fireEvent.click(regenerate)
+    const calls = fetchMock.mock.calls.filter(([request]) => requestPath(request).endsWith('/retry'))
+    expect(calls).toHaveLength(1)
+    expect(JSON.parse(String(calls[0]?.[1]?.body))).toEqual({ model: 'gemini-3.7-flash' })
+  })
+
   it('시작 모델을 저장해 요청에 전달하고 작업 중에는 변경을 막는다', async () => {
     const fetchMock = installBootstrapFetch((path) => path === '/api/jobs'
       ? jsonResponse(makeJob(), 202) : jsonResponse({}, 404))

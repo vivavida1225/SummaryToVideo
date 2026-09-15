@@ -199,11 +199,13 @@ main { width: min(1180px, calc(100% - 48px)); margin: 0 auto; }
 
 .progress-column { min-height: 100%; display: flex; flex-direction: column; gap: 14px; }
 .status-panel, .empty-status { min-height: 100%; padding: clamp(28px, 3.5vw, 42px); border-radius: 28px 4px 4px 4px; }
+.status-panel { min-height: 0; flex: 1; }
 .status-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
 .status-head .eyebrow { margin-bottom: 7px; }
 .state-badge { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 7px; padding: 7px 10px; color: var(--teal-dark); background: var(--teal-pale); border-radius: 100px; font-size: .67rem; font-weight: 700; }
 .state-badge i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.state-badge:not(.state-completed):not(.state-failed) i { animation: pulse 1.5s infinite; }
+.state-badge:not(.state-completed):not(.state-failed):not(.state-needs_review) i { animation: pulse 1.5s infinite; }
+.state-badge.state-needs_review { color: #795b21; background: #f6edce; }
 .state-badge.state-failed { color: #9c4435; background: #f7e5df; }
 .job-meta { display: flex; flex-wrap: wrap; gap: 7px; margin: 22px 0 27px; }
 .job-meta span { padding: 5px 9px; color: var(--navy-soft); background: #eeece5; border-radius: 5px; font: 600 .68rem 'Segoe UI', sans-serif; }
@@ -230,6 +232,10 @@ main { width: min(1180px, calc(100% - 48px)); margin: 0 auto; }
 .failure-card strong { font-size: .86rem; }
 .failure-card p { margin: 7px 0 14px; font-size: .78rem; line-height: 1.6; }
 .failure-card button { padding: 8px 11px; color: #71352c; background: transparent; border: 1px solid #c98677; border-radius: 6px; font-size: .74rem; font-weight: 700; }
+.review-card { color: #795b21; background: #faf3df; border-color: #e4d39b; }
+.review-card ul { padding-left: 18px; font-size: .78rem; line-height: 1.7; }
+.review-card button { color: #795b21; border-color: #bfa362; }
+.result-panel header { flex-wrap: wrap; gap: 12px; }
 
 .results { margin-top: 76px; }
 .results-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding-bottom: 20px; border-bottom: 1px solid rgba(20,41,57,.15); }

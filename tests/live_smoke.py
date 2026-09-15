@@ -1,6 +1,6 @@
 """Explicit live integration check; excluded from pytest discovery.
 
-Uses the configured API and writes the two successful stages to the real clipboard.
+Uses the configured API and saves results without changing the clipboard.
 Run from project root: .venv/Scripts/python.exe -m tests.live_smoke
 """
 
@@ -23,7 +23,7 @@ async def main():
         if marker != previous:
             print(json.dumps({'state': marker[0], 'attempt': marker[1], 'key_number': marker[2]}, ensure_ascii=False), flush=True)
             previous = marker
-        if current['state'] in ('completed', 'failed'):
+        if current['state'] in ('completed', 'failed', 'needs_review'):
             break
         await asyncio.sleep(1)
     Path('.runtime').mkdir(exist_ok=True)

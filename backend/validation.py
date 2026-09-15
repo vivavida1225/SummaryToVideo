@@ -22,9 +22,15 @@ UP = re.compile(r'상승|급등|폭등|반등|오른|올랐|올라|오르|오름
 DOWN = re.compile(r'하락|급락|폭락|내린|내렸|내려|내리|내림|약세|떨어|떨었')
 
 
+def count_characters(text: str) -> int:
+    return len(text.replace('\r', '').replace('\n', ''))
+
+
 class ValidationError(ValueError):
-    def __init__(self, issues: str | list[str]):
+    def __init__(self, issues: str | list[str], *, body_char_count: int | None = None):
         self.issues = [issues] if isinstance(issues, str) else issues
+        self.body_char_count = body_char_count
+        self.excess_char_count = max(0, body_char_count - MAX_CHARS) if body_char_count is not None else 0
         super().__init__('\n'.join(self.issues))
 
 
@@ -146,7 +152,7 @@ def _validate_indices(first_line: str, serialized: str) -> list[str]:
 def validate_compressed(response: str, serialized: str) -> ValidatedText:
     index_triples(serialized)  # Invalid source cannot be repaired by rewriting the response.
     issues = []
-    body = response.replace('\r\n', '\n').strip()
+    body = response.replace('\r\n', '\n').strip('\n')
     lines = body.split('\n')
     if len(lines) != 5 or any(not line.strip() for line in lines):
         issues.append('빈 줄 없이 정확히 5줄인 일반 텍스트 대본이 필요합니다.')
@@ -165,7 +171,7 @@ def validate_compressed(response: str, serialized: str) -> ValidatedText:
         if re.search(r'[!?。！？]', content):
             issues.append(f'장면 {i}: 본문 문장은 마침표로 끝내세요.')
     issues.extend(_validate_indices(lines[0], serialized))
-    chars = sum(map(len, lines))
+    chars = count_characters(body)
     if chars < MIN_CHARS:
         issues.append(f'전체 대본은 {MIN_CHARS}~{MAX_CHARS}자여야 합니다. 현재 {chars}자로 '
                               f'{MIN_CHARS - chars}자 부족합니다. 원문의 근거와 시장 영향을 보충하세요 '
@@ -175,5 +181,5 @@ def validate_compressed(response: str, serialized: str) -> ValidatedText:
                               f'{chars - MAX_CHARS}자 초과합니다. 중복과 세부 정보를 줄이세요 '
                               '(인사말·숫자·공백 포함, 개행 제외).')
     if issues:
-        raise ValidationError(issues)
+        raise ValidationError(issues, body_char_count=chars)
     return ValidatedText(body, chars, [])

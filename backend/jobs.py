@@ -5,12 +5,13 @@ import uuid
 from datetime import datetime, timezone
 
 from .clipboard import WindowsClipboard
-from .compression import CompressionError, Compressor
+from .compression import CompressionError, Compressor, ResponseValidationError
 from .config import Settings
 from .models import model_candidates
 from .narration import decode_response
 from .serializer import serialize_html
 from .storage import ResultStore, read_source
+from .validation import count_characters
 
 
 def now() -> str:
@@ -32,7 +33,7 @@ class JobManager:
         self.jobs, self.tasks, self.started = {}, {}, {}
         self.active_id = None
 
-    def start(self, *, html=None, file_path=None, snapshot=None, parent_id=None, model=None) -> dict:
+    def start(self, *, html=None, file_path=None, snapshot=None, parent_id=None, model=None, repair_context=None) -> dict:
         if self.active_id:
             raise JobConflict(self.active_id)
         model = model if model is not None else self.settings.model
@@ -40,21 +41,22 @@ class JobManager:
         keys = list(self.settings.keys())
         job_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f_') + uuid.uuid4().hex[:8]
         job = dict(id=job_id, parent_id=parent_id, state='queued', source=file_path or ('이전 직렬화 결과' if parent_id else '클립보드 / 직접 입력'),
-                   created_at=now(), elapsed_seconds=0, attempt=0, max_attempts=len(candidates) + len(keys), key_number=None,
+                   created_at=now(), elapsed_seconds=0, attempt=0,
+                   max_attempts=len(candidates) + len(keys) - int(repair_context is not None), key_number=None,
                    retry_at=None, serialized=None, compressed=None, scene_count=None, body_char_count=None,
                    warnings=[], error=None, output_dir=f'outputs/{job_id}', events=[], model=model,
-                   requested_model=model, attempted_models=[])
+                   requested_model=model, attempted_models=[], validation_issues=[], excess_char_count=0)
         self.jobs[job_id] = job
         self.started[job_id] = time.monotonic()
         self.active_id = job_id
-        self.tasks[job_id] = asyncio.create_task(self._execute(job_id, html, file_path, snapshot, keys))
+        self.tasks[job_id] = asyncio.create_task(self._execute(job_id, html, file_path, snapshot, keys, repair_context))
         return self.get(job_id)
 
     def get(self, job_id: str) -> dict:
         if job_id not in self.jobs:
             self.jobs[job_id] = self.store.load(job_id)
         job = copy.deepcopy(self.jobs[job_id])
-        if job['state'] not in ('completed', 'failed') and job_id in self.started:
+        if job['state'] not in ('completed', 'failed', 'needs_review') and job_id in self.started:
             job['elapsed_seconds'] = round(time.monotonic() - self.started[job_id], 1)
         return job
 
@@ -70,10 +72,15 @@ class JobManager:
 
     def retry(self, job_id: str, *, model=None) -> dict:
         original = self.get(job_id)
-        if original['state'] != 'failed' or not original['serialized']:
-            raise ValueError('직렬화 결과가 보관된 실패 작업만 다시 시도할 수 있습니다.')
+        if original['state'] not in ('failed', 'needs_review') or not original['serialized']:
+            raise ValueError('직렬화 결과가 보관된 실패 또는 분량 확인 작업만 다시 시도할 수 있습니다.')
         requested = model if model is not None else original.get('requested_model', original.get('model', self.settings.model))
-        return self.start(snapshot=original['serialized'], parent_id=job_id, model=requested)
+        context = None
+        if original['state'] == 'needs_review':
+            if not original['compressed']:
+                raise ValueError('보정할 대본이 없습니다. 원문으로 새 작업을 시작하세요.')
+            context = dict(previous_response=original['compressed'], validation_issues=list(original.get('validation_issues', [])))
+        return self.start(snapshot=original['serialized'], parent_id=job_id, model=requested, repair_context=context)
 
     def artifact(self, job_id: str, name: str) -> str:
         if name not in {'serialized.txt', 'compressed.txt'}:
@@ -97,16 +104,7 @@ class JobManager:
         if persist:
             self.store.metadata(job)
 
-    async def _copy(self, job_id: str, stage: str):
-        name = '직렬화' if stage == 'serialized' else '압축'
-        self._event(job_id, 'copying_' + stage, message=f'{name} 결과를 클립보드에 복사합니다.')
-        try:
-            await self.copy_result(job_id, stage)
-            self.jobs[job_id]['events'].append({'at': now(), 'message': f'{name} 결과 자동 복사 완료'})
-        except (OSError, ValueError):
-            self.jobs[job_id]['warnings'].append(f'{name} 결과의 클립보드 자동 복사에 실패했습니다. 결과의 복사 버튼을 다시 누르세요.')
-
-    async def _execute(self, job_id, html, file_path, snapshot, keys):
+    async def _execute(self, job_id, html, file_path, snapshot, keys, repair_context):
         job = self.jobs[job_id]
         try:
             self._event(job_id, 'serializing', persist=False,
@@ -119,25 +117,28 @@ class JobManager:
             job['serialized'] = serialized
             job['scene_count'] = serialized.count('\n===\n') + 1
             self.store.write_text(job_id, 'serialized.txt', serialized)
-            if snapshot is None:
-                await self._copy(job_id, 'serialized')
             compressor = self.compressor_factory(model=job['requested_model'], keys=keys)
             result = await compressor.run(serialized,
                 lambda state, **fields: self._event(job_id, state, **fields),
                 lambda attempt, raw: self.store.write_text(job_id, f'invalid_response_{attempt}.txt', raw),
-                save_raw=lambda attempt, raw: self.store.write_text(job_id, f'raw_response_{attempt}.txt', raw))
+                save_raw=lambda attempt, raw: self.store.write_text(job_id, f'raw_response_{attempt}.txt', raw),
+                **(repair_context or {}))
             job.update(compressed=result.text, body_char_count=result.body_char_count)
             job['warnings'].extend(result.warnings)
             self.store.write_text(job_id, 'compressed.txt', result.text)
-            await self._copy(job_id, 'compressed')
             self._event(job_id, 'completed', retry_at=None, message='1분 압축이 완료되었습니다.')
         except asyncio.CancelledError:
             job.update(state='failed', error='서버 종료로 작업이 중단되었습니다.', retry_at=None)
         except CompressionError as exc:
             job.update(state='failed', error=self.settings.redact(str(exc)), retry_at=None)
+            if isinstance(exc, ResponseValidationError):
+                job.update(validation_issues=exc.validation_issues, excess_char_count=exc.excess_char_count)
+                if exc.excess_char_count > 0:
+                    job.update(state='needs_review', error=None)
+                    job['events'].append({'at': now(), 'message': '분량 확인 필요: 자동 보정을 중단했습니다. 대본 재생성 버튼으로 보정할 수 있습니다.'})
             if exc.response:
                 draft = decode_response(exc.response)[0]
-                job.update(compressed=draft, body_char_count=len(draft.replace('\r\n', '\n').replace('\n', '')))
+                job.update(compressed=draft, body_char_count=count_characters(draft))
                 try:
                     self.store.write_text(job_id, 'compressed.txt', draft)
                 except OSError:

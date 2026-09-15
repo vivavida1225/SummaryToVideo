@@ -8,7 +8,7 @@ from .gemini import GeminiTransport, ProviderError
 from .models import MODEL, model_candidates, model_label
 from .narration import decode_response, validate_response
 from .validation import (MIN_CHARS, MAX_CHARS, TARGET_CHARS, ValidatedText, ValidationError,
-                         index_triples, validate_compressed)
+                         count_characters, index_triples, validate_compressed)
 
 
 OUTPUT_CONTRACT = '''
@@ -61,12 +61,15 @@ class ResponseValidationError(CompressionError):
     def __init__(self, error: ValidationError, response: str):
         super().__init__(f'응답 검증 실패: {error}')
         self.response = response
+        self.validation_issues = error.issues
+        self.body_char_count = error.body_char_count
+        self.excess_char_count = error.excess_char_count
 
 
 def _repair_feedback(error: ValidationError, raw: str) -> str:
     decoded, _ = decode_response(raw)
-    lines = decoded.replace('\r\n', '\n').strip().split('\n')
-    chars = sum(map(len, lines))
+    lines = decoded.replace('\r\n', '\n').split('\n')
+    chars = count_characters(decoded)
     if chars < MIN_CHARS:
         adjustment = (f'최소 {MIN_CHARS - chars}자를 보충해야 합니다. 목표 {TARGET_CHARS}자까지 '
                       f'약 {TARGET_CHARS - chars}자를 원문의 근거·시장 영향으로 보충하세요.')
@@ -119,12 +122,14 @@ class Compressor:
         template = self.prompt_path.read_text(encoding='utf-8-sig')
         return template.replace('{{SCENE_MARKET_DATA}}', '[별도 사용자 메시지의 장면별 시황 데이터]') + OUTPUT_CONTRACT
 
-    async def run(self, serialized: str, emit, save_invalid, save_raw=None) -> ValidatedText:
+    async def run(self, serialized: str, emit, save_invalid, save_raw=None, *,
+                  previous_response: str = '', validation_issues: list[str] | None = None) -> ValidatedText:
         if not self.keys:
             raise CompressionError('.env에 GEMINI_API_KEY_1 등 API 키를 설정하세요.')
         index_triples(serialized)  # Fail locally before spending any API calls.
-        start, key_index, model_index, repairs = self.clock(), 0, 0, 0
-        feedback, previous_response = '', ''
+        start, key_index, model_index, repairs = self.clock(), 0, 0, int(bool(previous_response))
+        max_attempts = self.max_attempts - repairs
+        feedback = _repair_feedback(ValidationError(validation_issues or []), previous_response) if previous_response else ''
         attempted_models = []
         rejected_keys = set()
 
@@ -132,16 +137,16 @@ class Compressor:
             tried = ', '.join(dict.fromkeys(attempted_models))
             return CompressionError(f'{message} 시도한 모델: {tried}', decode_response(previous_response)[0] if previous_response else '')
 
-        for attempt in range(1, self.max_attempts + 1):
+        for attempt in range(1, max_attempts + 1):
             remaining = self.total_timeout - (self.clock() - start)
             if remaining <= 0:
                 raise fail(f'API 처리 전체 제한 시간({self.total_timeout:g}초)을 초과했습니다.')
             number, key = self.keys[key_index]
             model = self.models[model_index]
             attempted_models.append(model)
-            emit('requesting', attempt=attempt, max_attempts=self.max_attempts, key_number=number, retry_at=None,
+            emit('requesting', attempt=attempt, max_attempts=max_attempts, key_number=number, retry_at=None,
                  model=model, attempted_models=list(dict.fromkeys(attempted_models)),
-                 message=f'{model_label(model)} 응답 대기 · {attempt}/{self.max_attempts}회 · 키 {number}')
+                 message=f'{model_label(model)} 응답 대기 · {attempt}/{max_attempts}회 · 키 {number}')
             try:
                 async with asyncio.timeout(min(self.request_timeout, remaining)):
                     raw = await self.transport.generate(
@@ -158,7 +163,7 @@ class Compressor:
                     return validate_response(raw, serialized)
                 except ValidationError as exc:
                     save_invalid(attempt, raw)
-                    if repairs >= 1:
+                    if exc.excess_char_count > 0 or repairs >= 1:
                         raise ResponseValidationError(exc, decode_response(raw)[0]) from None
                     repairs += 1
                     feedback = _repair_feedback(exc, raw)

@@ -148,7 +148,7 @@ def test_failed_narration_poll_copy_and_download(tmp_path, tiny_html):
         assert response.status_code == 200 and response.text == draft
 
 
-def test_delimited_response_is_saved_copied_and_downloaded_as_five_lines(tmp_path, tiny_html, compressed):
+def test_delimited_response_is_saved_and_only_copied_on_request(tmp_path, tiny_html, compressed):
     from backend.compression import Compressor
     from tests.test_compression import Transport
     from pathlib import Path
@@ -166,7 +166,11 @@ def test_delimited_response_is_saved_copied_and_downloaded_as_five_lines(tmp_pat
         c.portal.call(manager.wait, job_id)
         job = c.get(f'/api/jobs/{job_id}', headers=headers).json()
         assert job['state'] == 'completed' and job['compressed'] == compressed
-        assert copied[-1] == compressed
+        assert copied == []
+        assert c.post(f'/api/jobs/{job_id}/copy', headers=headers, json={'stage': 'serialized'}).status_code == 200
+        assert copied == [job['serialized']]
+        assert c.post(f'/api/jobs/{job_id}/copy', headers=headers, json={'stage': 'compressed'}).status_code == 200
+        assert copied == [job['serialized'], compressed]
         folder = tmp_path / job['output_dir']
         assert (folder / 'raw_response_1.txt').read_text(encoding='utf-8') == raw
         assert (folder / 'compressed.txt').read_text(encoding='utf-8') == compressed

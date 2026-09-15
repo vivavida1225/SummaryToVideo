@@ -1,6 +1,6 @@
 """Decode explicit scene boundaries without guessing or rewriting narration."""
 
-from .validation import ValidationError, validate_compressed
+from .validation import ValidationError, count_characters, validate_compressed
 
 SCENE_BREAK = '<SCENE_BREAK>'
 
@@ -26,5 +26,5 @@ def validate_response(raw: str, serialized: str):
     except ValidationError as exc:
         issues.extend(exc.issues)
     if issues:
-        raise ValidationError(issues)
+        raise ValidationError(issues, body_char_count=count_characters(text))
     return result

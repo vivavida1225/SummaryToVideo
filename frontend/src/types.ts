@@ -7,6 +7,7 @@ export type JobState =
   | 'validating'
   | 'copying_compressed'
   | 'completed'
+  | 'needs_review'
   | 'failed'
 
 export interface JobEvent {
@@ -32,6 +33,8 @@ export interface Job {
   compressed: string | null
   scene_count: number | null
   body_char_count: number | null
+  excess_char_count?: number
+  validation_issues?: string[]
   warnings: string[]
   error: string | null
   output_dir: string
