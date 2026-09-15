@@ -22,7 +22,10 @@ export interface Job {
   created_at: string
   elapsed_seconds: number
   attempt: number
-  max_attempts: 3
+  max_attempts: number
+  model?: string
+  requested_model?: string | null
+  attempted_models?: string[]
   key_number: number | null
   retry_at: string | null
   serialized: string | null
@@ -38,7 +41,13 @@ export interface Job {
 export interface SessionInfo {
   token: string
   model: string
+  models: ModelOption[]
   configured_keys: number[]
+}
+
+export interface ModelOption {
+  id: string
+  label: string
 }
 
 export interface SourceFile {

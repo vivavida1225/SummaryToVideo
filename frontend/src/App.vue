@@ -7,9 +7,11 @@ import StatusTimeline from './components/StatusTimeline.vue'
 import type { Job, SessionInfo, SourceFile } from './types'
 
 const JOB_STORAGE_KEY = 'market-compressor.job-id'
+const MODEL_STORAGE_KEY = 'market-compressor.model'
 const TERMINAL_STATES = new Set(['completed', 'failed'])
 
 const session = ref<SessionInfo | null>(null)
+const selectedModel = ref('')
 const files = ref<SourceFile[]>([])
 const sourceMode = ref<'clipboard' | 'file'>('clipboard')
 const clipboardText = ref('')
@@ -26,7 +28,7 @@ let disposed = false
 
 const isRunning = computed(() => job.value !== null && !TERMINAL_STATES.has(job.value.state))
 const canRun = computed(() => {
-  if (loading.value || actionBusy.value || isRunning.value) return false
+  if (loading.value || actionBusy.value || isRunning.value || !selectedModel.value) return false
   return sourceMode.value === 'clipboard' ? clipboardText.value.trim().length > 0 : selectedFile.value.length > 0
 })
 
@@ -41,9 +43,24 @@ function friendlyError(error: unknown) {
   return '예기치 못한 오류가 발생했습니다.'
 }
 
+function readStored(storage: 'localStorage' | 'sessionStorage', key: string) {
+  try { return window[storage].getItem(key) } catch { return null }
+}
+
+function writeStored(storage: 'localStorage' | 'sessionStorage', key: string, value: string | null) {
+  try {
+    if (value === null) window[storage].removeItem(key)
+    else window[storage].setItem(key, value)
+  } catch { /* Storage can be blocked; keep this page usable. */ }
+}
+
+function rememberModel() {
+  writeStored('localStorage', MODEL_STORAGE_KEY, selectedModel.value)
+}
+
 function rememberJob(nextJob: Job) {
   job.value = nextJob
-  sessionStorage.setItem(JOB_STORAGE_KEY, nextJob.id)
+  writeStored('sessionStorage', JOB_STORAGE_KEY, nextJob.id)
 }
 
 function stopPolling() {
@@ -73,7 +90,7 @@ async function pollJob() {
   } catch (error) {
     pageError.value = friendlyError(error)
     if (error instanceof ApiError && (error.status === 403 || error.status === 404)) {
-      sessionStorage.removeItem(JOB_STORAGE_KEY)
+      writeStored('sessionStorage', JOB_STORAGE_KEY, null)
       job.value = null
     }
   } finally {
@@ -95,7 +112,7 @@ async function recoverJob(id: string) {
     return true
   } catch (error) {
     if (error instanceof ApiError && error.status === 404) {
-      sessionStorage.removeItem(JOB_STORAGE_KEY)
+      writeStored('sessionStorage', JOB_STORAGE_KEY, null)
       return false
     }
     throw error
@@ -105,10 +122,13 @@ async function recoverJob(id: string) {
 onMounted(async () => {
   try {
     session.value = await bootstrapSession()
+    const savedModel = readStored('localStorage', MODEL_STORAGE_KEY)
+    selectedModel.value = session.value.models.some(model => model.id === savedModel) ? savedModel! : session.value.model
+    rememberModel()
     const [fileResult, sourceResult] = await Promise.allSettled([
       api.files(),
       (async () => {
-        const savedJobId = sessionStorage.getItem(JOB_STORAGE_KEY)
+        const savedJobId = readStored('sessionStorage', JOB_STORAGE_KEY)
         const recovered = savedJobId ? await recoverJob(savedJobId) : false
         if (!recovered) await readClipboard()
       })(),
@@ -167,7 +187,7 @@ async function runJob() {
     const source = sourceMode.value === 'clipboard'
       ? { html: clipboardText.value }
       : { file_path: selectedFile.value }
-    const created = await api.createJob(source)
+    const created = await api.createJob({ ...source, model: selectedModel.value })
     rememberJob(created)
     schedulePoll()
   } catch (error) {
@@ -190,11 +210,11 @@ async function runJob() {
 }
 
 async function retryJob() {
-  if (!job.value || actionBusy.value) return
+  if (!job.value || actionBusy.value || loading.value || isRunning.value || !selectedModel.value) return
   actionBusy.value = true
   pageError.value = ''
   try {
-    const retried = await api.retry(job.value.id)
+    const retried = await api.retry(job.value.id, selectedModel.value)
     rememberJob(retried)
     schedulePoll()
   } catch (error) {
@@ -259,7 +279,11 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
         <span class="online-dot" aria-hidden="true" />
         <span>로컬 연결</span>
         <span class="divider" aria-hidden="true" />
-        <span>{{ session.model }}</span>
+        <label for="start-model" class="sr-only">시작 모델</label>
+        <select id="start-model" v-model="selectedModel" class="model-select"
+          :disabled="loading || actionBusy || isRunning" @change="rememberModel">
+          <option v-for="model in session.models" :key="model.id" :value="model.id">{{ model.label }}</option>
+        </select>
         <span class="keys">키 {{ session.configured_keys.join(' · ') || '없음' }}</span>
       </div>
     </header>
@@ -351,7 +375,7 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
         </section>
 
         <aside class="progress-column" aria-label="작업 진행 상황">
-          <StatusTimeline v-if="job" :job="job" />
+          <StatusTimeline v-if="job" :job="job" :models="session?.models ?? []" />
           <section v-else class="empty-status">
             <div class="orb" aria-hidden="true"><span /><span /><span /></div>
             <p class="eyebrow">READY WHEN YOU ARE</p>
@@ -362,7 +386,7 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
           <div v-if="job?.state === 'failed'" class="failure-card" role="alert">
             <strong>작업 중 문제가 생겼습니다</strong>
             <p>{{ job.error || '작업을 완료하지 못했습니다.' }}</p>
-            <button v-if="job.serialized" type="button" :disabled="actionBusy" @click="retryJob">압축 다시 시도</button>
+            <button v-if="job.serialized" type="button" :disabled="loading || actionBusy" @click="retryJob">압축 다시 시도</button>
           </div>
         </aside>
       </div>

@@ -35,18 +35,19 @@ def call():
     return asyncio.run(GeminiTransport().generate(key='test-secret', model='model', prompt='p', source='s', feedback='', timeout=60))
 
 
-@pytest.mark.parametrize('code,reason,retryable', [
-    (400, 'API_KEY_INVALID', True), (400, 'INVALID_ARGUMENT', False),
-    (401, 'UNAUTHENTICATED', True), (403, 'PERMISSION_DENIED', True),
-    (404, 'NOT_FOUND', False), (429, 'RESOURCE_EXHAUSTED', True), (503, 'UNAVAILABLE', True),
+@pytest.mark.parametrize('code,reason,action', [
+    (400, 'API_KEY_INVALID', 'next_key'), (400, 'INVALID_ARGUMENT', 'stop'),
+    (401, 'UNAUTHENTICATED', 'next_key'), (403, 'PERMISSION_DENIED', 'next_key'),
+    (404, 'NOT_FOUND', 'next_model'), (429, 'RESOURCE_EXHAUSTED', 'next_model'),
+    (408, 'DEADLINE_EXCEEDED', 'next_model'), (503, 'UNAVAILABLE', 'next_model'),
 ])
-def test_sdk_error_classification_and_secret_redaction(monkeypatch, code, reason, retryable):
+def test_sdk_error_classification_and_secret_redaction(monkeypatch, code, reason, action):
     exc = errors.APIError(code, {'error': {'code': code, 'message': 'test-secret', 'status': reason,
                 'details': [{'reason': reason}, {'retryDelay': '12.5s'}]}})
     install_response(monkeypatch, exc)
     with pytest.raises(ProviderError) as result:
         call()
-    assert result.value.retryable is retryable
+    assert result.value.action == action
     assert 'test-secret' not in str(result.value)
     assert result.value.retry_after == 12.5
 

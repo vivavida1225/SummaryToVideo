@@ -66,7 +66,7 @@ class ResultStore:
         return path
 
     def write_text(self, job_id: str, name: str, text: str):
-        if not re.fullmatch(r'(?:serialized|compressed|(?:invalid|raw)_response_[1-3])\.txt|metadata\.json', name):
+        if not re.fullmatch(r'(?:serialized|compressed|(?:invalid|raw)_response_[1-9]\d*)\.txt|metadata\.json', name):
             raise ValueError('허용되지 않은 결과 파일입니다.')
         folder = self.directory(job_id)
         folder.mkdir(parents=True, exist_ok=True)
@@ -90,16 +90,18 @@ class ResultStore:
         if not metadata_path.resolve().is_relative_to(folder):
             raise ValueError('결과 경로를 확인하세요.')
         job = json.loads(metadata_path.read_text(encoding='utf-8'))
+        job.setdefault('requested_model', job.get('model'))
+        job.setdefault('attempted_models', [])
         for stage in ('serialized', 'compressed'):
             path = folder / (stage + '.txt')
             if not path.resolve().is_relative_to(folder):
                 raise ValueError('결과 경로를 확인하세요.')
             job[stage] = path.read_text(encoding='utf-8') if path.exists() else None
-        if (job['state'] == 'failed' and not job['compressed']
-                and (job.get('error') or '').startswith('응답 검증 실패:')):
+        if job['state'] != 'completed' and not job['compressed']:
             # Expose the latest saved draft from older runs without converting files.
-            for attempt in (3, 2, 1):
-                path = folder / f'invalid_response_{attempt}.txt'
+            drafts = [path for path in folder.glob('invalid_response_*.txt')
+                      if re.fullmatch(r'invalid_response_[1-9]\d*\.txt', path.name)]
+            for path in sorted(drafts, key=lambda path: int(path.stem.rsplit('_', 1)[1]), reverse=True):
                 if not path.resolve().is_relative_to(folder):
                     raise ValueError('결과 경로를 확인하세요.')
                 if path.exists():

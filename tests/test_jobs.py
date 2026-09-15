@@ -36,7 +36,7 @@ def setup(tmp_path, response, clipboard=None):
     (tmp_path / 'src').mkdir()
     clipboard = clipboard or Clipboard()
     compressor = Compressor(response, clipboard)
-    manager = JobManager(settings, clipboard=clipboard, compressor_factory=lambda: compressor)
+    manager = JobManager(settings, clipboard=clipboard, compressor_factory=lambda **options: compressor)
     return manager, clipboard, compressor
 
 
@@ -139,7 +139,7 @@ def test_validation_failure_is_visible_saved_and_manually_copyable(tmp_path, tin
         prompt = tmp_path / 'prompt.txt'
         prompt.write_text('instructions', encoding='utf-8')
         last = '  invalid final draft\n\n'
-        manager.compressor_factory = lambda: RealCompressor(prompt, [(1, 'fake')],
+        manager.compressor_factory = lambda **options: RealCompressor(prompt, [(1, 'fake')],
             transport=Transport(['first invalid draft', last]))
         job = manager.start(html=tiny_html)
         await manager.wait(job['id'])
@@ -169,4 +169,53 @@ def test_unwritable_output_root_still_generates_downloadable_serialization(tmp_p
         assert result['state'] == 'failed'
         assert result['serialized'] and manager.artifact(job['id'], 'serialized.txt').startswith('<1>')
         assert not compressor.sources
+    asyncio.run(scenario())
+
+
+def test_job_snapshots_model_and_keys_before_async_execution(tmp_path, tiny_html, compressed):
+    from backend.compression import Compressor as RealCompressor
+    from tests.test_compression import Transport
+
+    async def scenario():
+        manager, _, _ = setup(tmp_path, compressed)
+        prompt = tmp_path / 'prompt.txt'
+        prompt.write_text('instructions', encoding='utf-8')
+        key_file = tmp_path / '.env'
+        key_file.write_text('GEMINI_API_KEY_1=original', encoding='utf-8')
+        transport = Transport([compressed])
+        manager.compressor_factory = lambda **options: RealCompressor(prompt, transport=transport, **options)
+        job = manager.start(html=tiny_html, model='gemini-3.7-flash')
+        key_file.write_text('GEMINI_API_KEY_2=changed', encoding='utf-8')
+        manager.settings.model = 'gemini-3.5-flash-lite'
+        await manager.wait(job['id'])
+        assert transport.calls[0]['key'] == 'original'
+        assert transport.calls[0]['model'] == 'gemini-3.7-flash'
+        result = manager.get(job['id'])
+        assert result['state'] == 'completed' and result['max_attempts'] == 4
+        assert result['requested_model'] == 'gemini-3.7-flash'
+    asyncio.run(scenario())
+
+
+def test_transport_exhaustion_preserves_draft_without_auto_copy(tmp_path, tiny_html):
+    from backend.compression import Compressor as RealCompressor
+    from backend.gemini import ProviderError
+    from tests.test_compression import Transport
+
+    async def scenario():
+        manager, clipboard, _ = setup(tmp_path, None)
+        prompt = tmp_path / 'prompt.txt'
+        prompt.write_text('instructions', encoding='utf-8')
+        transport = Transport([ProviderError('quota', retryable=True)] * 3 + ['saved draft', ProviderError('timeout', retryable=True)])
+        manager.compressor_factory = lambda **options: RealCompressor(prompt, [(1, 'fake')], transport=transport, model=options['model'])
+        job = manager.start(html=tiny_html)
+        await manager.wait(job['id'])
+        result = manager.get(job['id'])
+        assert result['state'] == 'failed' and result['compressed'] == 'saved draft'
+        assert result['model'] == 'gemini-3.5-flash-lite'
+        assert result['requested_model'] == 'gemini-3.8-flash'
+        assert len(result['attempted_models']) == 4 and result['attempt'] == 5
+        assert clipboard.writes == [result['serialized']]
+        assert (tmp_path / result['output_dir'] / 'raw_response_4.txt').read_text(encoding='utf-8') == 'saved draft'
+        restored = JobManager(manager.settings, clipboard=clipboard)
+        assert restored.artifact(job['id'], 'compressed.txt') == 'saved draft'
     asyncio.run(scenario())

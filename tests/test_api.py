@@ -22,6 +22,55 @@ def auth(c):
     return {'X-App-Token': c.get('/api/session').json()['token']}
 
 
+def test_session_catalog_and_job_model_validation(tmp_path):
+    with client(tmp_path) as c:
+        session = c.get('/api/session').json()
+        assert session['model'] == 'gemini-3.8-flash'
+        assert [m['id'] for m in session['models']] == [
+            'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite']
+        headers = auth(c)
+        rejected = c.post('/api/jobs', headers=headers, json={'html': 'invalid', 'model': 'unknown'})
+        assert rejected.status_code == 422 and '모델' in rejected.json()['detail']
+        chosen = c.post('/api/jobs', headers=headers, json={'html': 'invalid', 'model': 'gemini-3.7-flash'})
+        assert chosen.status_code == 202
+        assert chosen.json()['requested_model'] == 'gemini-3.7-flash'
+        c.portal.call(c.app.state.manager.wait, chosen.json()['id'])
+        default = c.post('/api/jobs', headers=headers, json={'html': 'invalid'})
+        assert default.json()['requested_model'] == 'gemini-3.8-flash'
+
+
+def test_retry_model_and_original_source_reach_transport(tmp_path, tiny_html, compressed, monkeypatch):
+    from backend.gemini import GeminiTransport, ProviderError
+    calls = []
+
+    async def generate(self, **kwargs):
+        calls.append(kwargs)
+        if len(calls) <= 3:
+            raise ProviderError('quota', retryable=True)
+        return compressed
+
+    monkeypatch.setattr(GeminiTransport, 'generate', generate)
+    (tmp_path / '.env').write_text('GEMINI_API_KEY_1=fake', encoding='utf-8')
+    (tmp_path / 'prompts').mkdir()
+    (tmp_path / 'prompts/compress_to_1min.txt').write_text('instructions', encoding='utf-8')
+    with client(tmp_path) as c:
+        headers = auth(c)
+        first = c.post('/api/jobs', headers=headers, json={'html': tiny_html, 'model': 'gemini-3.7-flash'}).json()
+        manager = c.app.state.manager
+        c.portal.call(manager.wait, first['id'])
+        assert manager.get(first['id'])['state'] == 'failed'
+        rejected = c.post(f"/api/jobs/{first['id']}/retry", headers=headers, json={'model': 'unknown'})
+        assert rejected.status_code == 422 and '모델' in rejected.json()['detail']
+        retry = c.post(f"/api/jobs/{first['id']}/retry", headers=headers, json={'model': 'gemini-3.6-flash'}).json()
+        c.portal.call(manager.wait, retry['id'])
+        assert calls[-1]['model'] == 'gemini-3.6-flash'
+        assert calls[-1]['source'] == calls[0]['source']
+        assert manager.get(retry['id'])['state'] == 'completed'
+        legacy_retry = c.post(f"/api/jobs/{first['id']}/retry", headers=headers).json()
+        c.portal.call(manager.wait, legacy_retry['id'])
+        assert calls[-1]['model'] == 'gemini-3.7-flash'
+
+
 def test_clipboard_is_not_read_on_session_and_requires_token(tmp_path):
     with client(tmp_path) as c:
         headers = auth(c)
@@ -84,7 +133,7 @@ def test_failed_narration_poll_copy_and_download(tmp_path, tiny_html):
     draft = 'invalid final narration\nsecond line'
     with client(tmp_path) as c:
         manager = c.app.state.manager
-        manager.compressor_factory = lambda: Compressor(prompt, [(1, 'fake')],
+        manager.compressor_factory = lambda **options: Compressor(prompt, [(1, 'fake')],
             transport=Transport(['invalid first draft', draft]))
         copied = []
         manager.clipboard.write = copied.append
@@ -109,7 +158,7 @@ def test_delimited_response_is_saved_copied_and_downloaded_as_five_lines(tmp_pat
     raw = compressed.replace('\n', '<SCENE_BREAK>')
     with client(tmp_path) as c:
         manager = c.app.state.manager
-        manager.compressor_factory = lambda: Compressor(prompt, [(1, 'fake')], transport=Transport([raw]))
+        manager.compressor_factory = lambda **options: Compressor(prompt, [(1, 'fake')], transport=Transport([raw]))
         copied = []
         manager.clipboard.write = copied.append
         headers = auth(c)

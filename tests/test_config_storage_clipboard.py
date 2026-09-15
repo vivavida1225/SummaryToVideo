@@ -79,3 +79,18 @@ def test_legacy_archived_result_loads_without_narration_revalidation(tmp_path):
     job = store.load(job_id)
     assert job['compressed'] == legacy
     assert job['body_char_count'] == 25
+
+
+def test_multi_digit_attempt_storage_and_legacy_model_recovery(tmp_path):
+    store = ResultStore(tmp_path)
+    job_id = '20260911_123000_000000_1234abcd'
+    store.metadata({'id': job_id, 'state': 'failed', 'model': 'gemini-3.7-flash', 'error': 'API failed'})
+    store.write_text(job_id, 'invalid_response_9.txt', 'older')
+    store.write_text(job_id, 'invalid_response_10.txt', 'latest')
+    store.write_text(job_id, 'raw_response_10.txt', 'latest')
+    job = store.load(job_id)
+    assert job['compressed'] == 'latest'
+    assert job['requested_model'] == 'gemini-3.7-flash'
+    for name in ['raw_response_0.txt', 'raw_response_-1.txt', '../raw_response_10.txt']:
+        with pytest.raises(ValueError):
+            store.write_text(job_id, name, 'invalid')

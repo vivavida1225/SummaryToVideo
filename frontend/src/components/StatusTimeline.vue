@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-import type { Job, JobState } from '../types'
+import type { Job, JobState, ModelOption } from '../types'
 
-const props = defineProps<{ job: Job }>()
+const props = defineProps<{ job: Job; models: ModelOption[] }>()
 
 const stateLabel: Record<JobState, string> = {
   queued: '작업을 준비하는 중',
   serializing: '원문을 정돈하는 중',
   copying_serialized: '직렬화 원문을 복사하는 중',
   requesting: 'Gemini 응답을 기다리는 중',
-  retry_wait: '다음 키로 다시 요청할 예정',
+  retry_wait: '다음 요청을 준비하는 중',
   validating: '결과 형식을 확인하는 중',
   copying_compressed: '압축 결과를 복사하는 중',
   completed: '영상 원고가 완성되었습니다',
@@ -18,6 +18,7 @@ const stateLabel: Record<JobState, string> = {
 }
 
 const currentLabel = computed(() => stateLabel[props.job.state])
+const actualModel = computed(() => props.models.find(model => model.id === props.job.model)?.label ?? props.job.model)
 
 function formatEventTime(value: string) {
   const date = new Date(value)
@@ -40,6 +41,7 @@ function formatEventTime(value: string) {
     </div>
 
     <div class="job-meta" aria-label="작업 정보">
+      <span v-if="actualModel">{{ job.state === 'completed' ? '응답 모델' : '호출 모델' }}: {{ actualModel }}</span>
       <span>시도 {{ job.attempt }} / {{ job.max_attempts }}</span>
       <span v-if="job.key_number">API 키 {{ job.key_number }}</span>
       <span>{{ job.elapsed_seconds.toFixed(1) }}초</span>

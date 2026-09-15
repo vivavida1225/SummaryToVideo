@@ -4,7 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App.vue'
 import type { Job } from './types'
 
-const session = { token: 'session-token', model: 'gemini-3.5-flash-lite', configured_keys: [1, 3] }
+const session = {
+  token: 'session-token', model: 'gemini-3.8-flash', configured_keys: [1, 3],
+  models: [
+    { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
+    { id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash' },
+    { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash' },
+    { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite' },
+  ],
+}
 
 function makeJob(overrides: Partial<Job> = {}): Job {
   return {
@@ -65,11 +73,61 @@ async function finishBootstrap() {
 describe('App', () => {
   beforeEach(() => {
     sessionStorage.clear()
+    localStorage.clear()
     vi.useRealTimers()
   })
 
   afterEach(() => {
     vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('시작 모델을 저장해 요청에 전달하고 작업 중에는 변경을 막는다', async () => {
+    const fetchMock = installBootstrapFetch((path) => path === '/api/jobs'
+      ? jsonResponse(makeJob(), 202) : jsonResponse({}, 404))
+    render(App)
+    await finishBootstrap()
+    const select = screen.getByRole('combobox', { name: '시작 모델' })
+    expect(select).toHaveValue('gemini-3.8-flash')
+    expect(Array.from((select as HTMLSelectElement).options).map(option => option.value)).toEqual([
+      'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite',
+    ])
+    await fireEvent.update(select, 'gemini-3.7-flash')
+    expect(localStorage.getItem('market-compressor.model')).toBe('gemini-3.7-flash')
+    await fireEvent.click(screen.getByRole('button', { name: '변환 및 1분 압축' }))
+    await waitFor(() => expect(select).toBeDisabled())
+    const call = fetchMock.mock.calls.find(([request]) => requestPath(request) === '/api/jobs')
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ html: '<article>오늘의 시장</article>', model: 'gemini-3.7-flash' })
+  })
+
+  it.each([
+    ['gemini-3.6-flash', 'gemini-3.6-flash'], ['removed-model', 'gemini-3.8-flash'],
+  ])('저장된 모델 %s를 복원한다', async (saved, expected) => {
+    localStorage.setItem('market-compressor.model', saved)
+    installBootstrapFetch(() => jsonResponse({}, 404))
+    render(App)
+    await finishBootstrap()
+    expect(screen.getByRole('combobox', { name: '시작 모델' })).toHaveValue(expected)
+  })
+
+  it('브라우저 저장소가 차단되어도 모델을 선택하고 실행한다', async () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('denied') })
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('denied') })
+    installBootstrapFetch((path) => path === '/api/jobs' ? jsonResponse(makeJob(), 202) : jsonResponse({}, 404))
+    render(App)
+    await finishBootstrap()
+    await fireEvent.update(screen.getByRole('combobox', { name: '시작 모델' }), 'gemini-3.6-flash')
+    await fireEvent.click(screen.getByRole('button', { name: '변환 및 1분 압축' }))
+    expect(await screen.findByText('작업을 준비하는 중')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('폴백된 실제 모델을 표시하면서 시작 모델은 유지한다', async () => {
+    sessionStorage.setItem('market-compressor.job-id', 'job-1')
+    installBootstrapFetch(() => jsonResponse(makeJob({ state: 'completed', model: 'gemini-3.6-flash', requested_model: 'gemini-3.8-flash' })))
+    render(App)
+    expect(await screen.findByText('응답 모델: Gemini 3.6 Flash')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '시작 모델' })).toHaveValue('gemini-3.8-flash')
   })
 
   it('파일 목록 오류가 나도 클립보드 기본 입력은 불러온다', async () => {
@@ -82,7 +140,7 @@ describe('App', () => {
     }))
     render(App)
     await waitFor(() => expect(screen.getByRole('textbox', { name: '클립보드 HTML 원문' })).toHaveValue('<div>원문</div>'))
-    expect(screen.getByRole('button', { name: '변환 및 1분 압축' })).toBeEnabled()
+    await waitFor(() => expect(screen.getByRole('button', { name: '변환 및 1분 압축' })).toBeEnabled())
   })
 
   it('조회 중 작업이 사라지면 반복 조회를 멈추고 새 실행을 허용한다', async () => {
@@ -154,7 +212,7 @@ describe('App', () => {
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(([request]) => requestPath(request) === '/api/jobs')
       expect(call).toBeDefined()
-      expect(JSON.parse(String(call?.[1]?.body))).toEqual({ file_path: '오늘 시장.html' })
+      expect(JSON.parse(String(call?.[1]?.body))).toEqual({ file_path: '오늘 시장.html', model: 'gemini-3.8-flash' })
       expect(new Headers(call?.[1]?.headers).get('X-App-Token')).toBe('session-token')
     })
   })
@@ -225,12 +283,14 @@ describe('App', () => {
     })
     render(App)
 
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '시작 모델' })).toBeEnabled())
+    await fireEvent.update(screen.getByRole('combobox', { name: '시작 모델' }), 'gemini-3.6-flash')
     await fireEvent.click(await screen.findByRole('button', { name: '압축 다시 시도' }))
 
     await waitFor(() => {
       const retryCall = fetchMock.mock.calls.find(([request]) => requestPath(request) === '/api/jobs/failed-job/retry')
       expect(retryCall).toBeDefined()
-      expect(retryCall?.[1]?.body).toBeUndefined()
+      expect(JSON.parse(String(retryCall?.[1]?.body))).toEqual({ model: 'gemini-3.6-flash' })
       expect(sessionStorage.getItem('market-compressor.job-id')).toBe('retry-job')
     })
     expect(fetchMock.mock.calls.some(([request]) => requestPath(request) === '/api/clipboard/read')).toBe(false)

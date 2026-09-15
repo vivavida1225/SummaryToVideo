@@ -9,15 +9,27 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .config import MAX_INPUT_BYTES, Settings
 from .jobs import JobConflict, JobManager
+from .models import MODELS, model_candidates
 from .storage import list_sources, source_path
 
 
-class JobInput(BaseModel):
+class ModelInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
+    model: str | None = None
+
+    @field_validator('model')
+    @classmethod
+    def supported_model(cls, value):
+        if value is not None:
+            model_candidates(value)
+        return value
+
+
+class JobInput(ModelInput):
     html: str | None = Field(default=None, min_length=1, max_length=MAX_INPUT_BYTES)
     file_path: str | None = Field(default=None, min_length=1, max_length=1024)
 
@@ -89,6 +101,8 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
 
     @app.exception_handler(RequestValidationError)
     async def invalid_request(_request, exc):
+        if any('model' in error['loc'] for error in exc.errors()):
+            return JSONResponse({'detail': '지원하지 않는 모델입니다. 모델 목록에서 다시 선택하세요.'}, status_code=422)
         return JSONResponse({'detail': '입력 형식을 확인하세요. HTML 또는 파일 경로 중 하나만 지정해야 합니다.'}, status_code=422)
 
     @app.get('/api/health')
@@ -97,7 +111,8 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
 
     @app.get('/api/session')
     async def session():
-        return {'token': token, 'model': settings.model, 'configured_keys': [number for number, _ in settings.keys()]}
+        return {'token': token, 'model': settings.model, 'models': MODELS,
+                'configured_keys': [number for number, _ in settings.keys()]}
 
     @app.get('/api/files')
     async def files():
@@ -121,7 +136,7 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
                     raise ValueError('선택한 파일이 없습니다. 목록을 새로고침하세요.')
             except (ValueError, OSError) as exc:
                 raise HTTPException(422, str(exc)) from None
-        return manager.start(html=data.html, file_path=data.file_path)
+        return manager.start(html=data.html, file_path=data.file_path, model=data.model)
 
     def find_job(job_id):
         try:
@@ -134,10 +149,10 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
         return find_job(job_id)
 
     @app.post('/api/jobs/{job_id}/retry', status_code=202)
-    async def retry_job(job_id: str):
+    async def retry_job(job_id: str, data: ModelInput | None = None):
         find_job(job_id)
         try:
-            return manager.retry(job_id)
+            return manager.retry(job_id, model=data.model if data else None)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from None
 

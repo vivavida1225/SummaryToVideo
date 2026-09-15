@@ -55,7 +55,7 @@ export const api = {
     return request('/api/clipboard/read', { method: 'POST' })
   },
 
-  createJob(source: { html: string } | { file_path: string }): Promise<Job> {
+  createJob(source: ({ html: string } | { file_path: string }) & { model?: string }): Promise<Job> {
     return request('/api/jobs', { method: 'POST', body: JSON.stringify(source) })
   },
 
@@ -63,8 +63,8 @@ export const api = {
     return request(`/api/jobs/${encodeURIComponent(id)}`)
   },
 
-  retry(id: string): Promise<Job> {
-    return request(`/api/jobs/${encodeURIComponent(id)}/retry`, { method: 'POST' })
+  retry(id: string, model?: string): Promise<Job> {
+    return request(`/api/jobs/${encodeURIComponent(id)}/retry`, { method: 'POST', body: JSON.stringify({ model }) })
   },
 
   copy(id: string, stage: 'serialized' | 'compressed'): Promise<{ ok: true }> {

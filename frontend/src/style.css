@@ -107,6 +107,9 @@ svg {
 .online-dot { width: 7px; height: 7px; border-radius: 50%; background: #3f9b7c; box-shadow: 0 0 0 4px rgba(63,155,124,.12); }
 .divider { width: 1px; height: 14px; background: var(--line); }
 .keys { padding: 5px 9px; border: 1px solid var(--line); border-radius: 100px; }
+.model-select { max-width: 100%; min-height: 36px; padding: 6px 8px; color: var(--navy); background: var(--paper); border: 1px solid var(--line); border-radius: 6px; }
+.model-select:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.model-select:disabled { opacity: .65; cursor: not-allowed; }
 
 main { width: min(1180px, calc(100% - 48px)); margin: 0 auto; }
 
@@ -261,7 +264,7 @@ main { width: min(1180px, calc(100% - 48px)); margin: 0 auto; }
 }
 
 @media (max-width: 560px) {
-  .topbar { min-height: 72px; padding: 0 20px; }
+  .topbar { min-height: 72px; padding: 14px 20px; flex-wrap: wrap; gap: 12px; }
   .system-status { font-size: .68rem; }
   main, .footer-note { width: min(100% - 28px, 1180px); }
   .hero { padding: 50px 0 38px; }

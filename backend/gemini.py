@@ -4,6 +4,7 @@ import json
 import ssl
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from typing import Literal
 
 import httpx
 import truststore
@@ -12,9 +13,11 @@ from google.genai import errors, types
 
 
 class ProviderError(Exception):
-    def __init__(self, message: str, *, retryable: bool, retry_after: float | None = None):
+    def __init__(self, message: str, *, action: Literal['next_model', 'next_key', 'stop'] | None = None,
+                 retryable: bool = False, retry_after: float | None = None):
         super().__init__(message)
-        self.retryable = retryable
+        self.action = action or ('next_model' if retryable else 'stop')
+        self.retryable = self.action != 'stop'
         self.retry_after = retry_after
 
 
@@ -78,17 +81,22 @@ class GeminiTransport:
         except errors.APIError as exc:
             code = exc.code
             key_error = 'API_KEY_INVALID' in json.dumps(getattr(exc, 'details', {}), default=str)
-            retryable = key_error or code in (401, 403, 408, 429) or (code is not None and 500 <= code < 600)
+            action = 'stop'
             if key_error or code in (401, 403):
+                action = 'next_key'
                 message = 'API 키 인증 또는 접근 권한 오류입니다.'
             elif code == 429:
+                action = 'next_model'
                 message = 'API 호출 한도를 초과했습니다. 같은 프로젝트의 키는 한도를 공유합니다.'
             elif code == 404:
+                action = 'next_model'
                 message = f'모델 {model}을 찾을 수 없거나 이 키에서 사용할 수 없습니다.'
             elif code == 400:
                 message = 'Gemini 요청 설정이 올바르지 않습니다. 모델과 입력을 확인하세요.'
             else:
+                if code == 408 or (code is not None and 500 <= code < 600):
+                    action = 'next_model'
                 message = f'Gemini 서비스 오류입니다 (HTTP {code}).'
-            raise ProviderError(message, retryable=retryable, retry_after=_retry_after(exc)) from None
+            raise ProviderError(message, action=action, retry_after=_retry_after(exc)) from None
         except (httpx.TimeoutException, httpx.TransportError, TimeoutError, ConnectionError):
             raise ProviderError('Gemini 연결이 끊겼거나 제한 시간 내 응답하지 않았습니다.', retryable=True) from None

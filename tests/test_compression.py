@@ -34,12 +34,13 @@ def execute(tmp_path, serialized, answers, keys=None, **options):
     return result, transport, events, sleeps, invalid
 
 
-def test_rotates_keys_on_429_and_server_error(tmp_path, serialized, compressed):
+def test_switches_models_without_waiting_on_429_and_server_error(tmp_path, serialized, compressed):
     result, transport, events, sleeps, _ = execute(tmp_path, serialized,
         [ProviderError('호출 한도', retryable=True, retry_after=9), ProviderError('서버 오류', retryable=True), compressed])
     assert result.text.startswith('오늘의 AI 시황입니다.')
-    assert [c['key'] for c in transport.calls] == ['secret-a', 'secret-b', 'secret-c']
-    assert sleeps == [9, 4]
+    assert [c['key'] for c in transport.calls] == ['secret-a'] * 3
+    assert [c['model'] for c in transport.calls] == ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash']
+    assert sleeps == []
     assert [f['attempt'] for s, f in events if s == 'requesting'] == [1, 2, 3]
     assert all(c['source'] == serialized for c in transport.calls)
 
@@ -134,14 +135,14 @@ def test_final_validation_failure_carries_exact_last_response(tmp_path, serializ
     assert caught.value.response == last
 
 
-def test_three_transient_failures_stop(tmp_path, serialized):
-    with pytest.raises(CompressionError, match='3회'):
-        execute(tmp_path, serialized, [ProviderError('timeout', retryable=True)] * 3)
+def test_four_transient_failures_stop(tmp_path, serialized):
+    with pytest.raises(CompressionError, match='4회'):
+        execute(tmp_path, serialized, [ProviderError('timeout', retryable=True)] * 4)
 
 
-def test_non_retryable_model_error_stops_first_attempt(tmp_path, serialized):
-    with pytest.raises(CompressionError, match='모델'):
-        execute(tmp_path, serialized, [ProviderError('모델을 찾을 수 없습니다', retryable=False)])
+def test_non_retryable_request_error_stops_first_attempt(tmp_path, serialized):
+    with pytest.raises(CompressionError, match='요청'):
+        execute(tmp_path, serialized, [ProviderError('요청 설정 오류', action='stop')])
 
 
 def test_no_configured_key_is_actionable(tmp_path, serialized):
@@ -150,12 +151,13 @@ def test_no_configured_key_is_actionable(tmp_path, serialized):
         asyncio.run(runner.run(serialized, lambda *a, **k: None, lambda *a: None))
 
 
-def test_total_deadline_rejects_unbounded_server_wait(tmp_path, serialized):
-    with pytest.raises(CompressionError, match='전체 제한'):
-        execute(tmp_path, serialized, [ProviderError('429', retryable=True, retry_after=301)])
+def test_retry_hint_does_not_delay_different_model(tmp_path, serialized, compressed):
+    _, transport, _, sleeps, _ = execute(tmp_path, serialized,
+        [ProviderError('429', retryable=True, retry_after=301), compressed])
+    assert len(transport.calls) == 2 and not sleeps
 
 
-def test_unresponsive_transport_times_out_and_rotates(tmp_path, serialized, compressed):
+def test_unresponsive_transport_times_out_and_switches_model(tmp_path, serialized, compressed):
     class SlowTransport(Transport):
         async def generate(self, **kwargs):
             if len(self.calls) == 0:
@@ -170,4 +172,5 @@ def test_unresponsive_transport_times_out_and_rotates(tmp_path, serialized, comp
     runner = Compressor(prompt, [(1, 'a'), (2, 'b')], transport=transport, sleep=no_wait, request_timeout=0.02)
     result = asyncio.run(runner.run(serialized, lambda *a, **k: None, lambda *a: None))
     assert result.text.startswith('오늘의 AI 시황입니다.')
-    assert [c['key'] for c in transport.calls] == ['a', 'b']
+    assert [c['key'] for c in transport.calls] == ['a', 'a']
+    assert [c['model'] for c in transport.calls] == ['gemini-3.8-flash', 'gemini-3.7-flash']

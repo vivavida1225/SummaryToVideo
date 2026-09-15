@@ -4,7 +4,7 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
-from .compression import MODEL
+from .models import MODEL
 
 
 ROOT = Path(__file__).resolve().parents[1]

@@ -2,16 +2,14 @@
 
 import asyncio
 import time
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .gemini import GeminiTransport, ProviderError
+from .models import MODEL, model_candidates, model_label
 from .narration import decode_response, validate_response
 from .validation import (MIN_CHARS, MAX_CHARS, TARGET_CHARS, ValidatedText, ValidationError,
                          index_triples, validate_compressed)
 
-
-MODEL = 'gemini-3.5-flash-lite'
 
 OUTPUT_CONTRACT = '''
 [앱 출력 계약 — 5줄 낭독 대본]
@@ -54,7 +52,9 @@ OUTPUT_CONTRACT = '''
 
 
 class CompressionError(Exception):
-    pass
+    def __init__(self, message: str, response: str = ''):
+        super().__init__(message)
+        self.response = response
 
 
 class ResponseValidationError(CompressionError):
@@ -109,6 +109,8 @@ class Compressor:
                  transport=None, sleep=asyncio.sleep, clock=time.monotonic,
                  request_timeout: float = 60, total_timeout: float = 300):
         self.prompt_path, self.keys, self.model = prompt_path, keys, model
+        self.models = model_candidates(model)
+        self.max_attempts = len(self.models) + len(keys)
         self.transport = transport or GeminiTransport()
         self.sleep, self.clock = sleep, clock
         self.request_timeout, self.total_timeout = request_timeout, total_timeout
@@ -121,18 +123,29 @@ class Compressor:
         if not self.keys:
             raise CompressionError('.env에 GEMINI_API_KEY_1 등 API 키를 설정하세요.')
         index_triples(serialized)  # Fail locally before spending any API calls.
-        start, key_index, repairs, feedback, previous_response = self.clock(), 0, 0, '', ''
-        for attempt in range(1, 4):
+        start, key_index, model_index, repairs = self.clock(), 0, 0, 0
+        feedback, previous_response = '', ''
+        attempted_models = []
+        rejected_keys = set()
+
+        def fail(message):
+            tried = ', '.join(dict.fromkeys(attempted_models))
+            return CompressionError(f'{message} 시도한 모델: {tried}', decode_response(previous_response)[0] if previous_response else '')
+
+        for attempt in range(1, self.max_attempts + 1):
             remaining = self.total_timeout - (self.clock() - start)
             if remaining <= 0:
-                raise CompressionError('API 처리 전체 제한 시간(300초)을 초과했습니다.')
-            number, key = self.keys[key_index % len(self.keys)]
-            emit('requesting', attempt=attempt, key_number=number, retry_at=None,
-                 message=f'Gemini 응답 대기 · {attempt}/3회 · 키 {number}')
+                raise fail(f'API 처리 전체 제한 시간({self.total_timeout:g}초)을 초과했습니다.')
+            number, key = self.keys[key_index]
+            model = self.models[model_index]
+            attempted_models.append(model)
+            emit('requesting', attempt=attempt, max_attempts=self.max_attempts, key_number=number, retry_at=None,
+                 model=model, attempted_models=list(dict.fromkeys(attempted_models)),
+                 message=f'{model_label(model)} 응답 대기 · {attempt}/{self.max_attempts}회 · 키 {number}')
             try:
                 async with asyncio.timeout(min(self.request_timeout, remaining)):
                     raw = await self.transport.generate(
-                        key=key, model=self.model, prompt=self.prompt(), source=serialized,
+                        key=key, model=model, prompt=self.prompt(), source=serialized,
                         feedback=feedback, previous_response=previous_response,
                         timeout=min(self.request_timeout, remaining),
                     )
@@ -145,7 +158,7 @@ class Compressor:
                     return validate_response(raw, serialized)
                 except ValidationError as exc:
                     save_invalid(attempt, raw)
-                    if repairs >= 1 or attempt == 3:
+                    if repairs >= 1:
                         raise ResponseValidationError(exc, decode_response(raw)[0]) from None
                     repairs += 1
                     feedback = _repair_feedback(exc, raw)
@@ -156,15 +169,19 @@ class Compressor:
                 failure = ProviderError('제한 시간 내 Gemini 응답이 없습니다.', retryable=True)
             except ProviderError as exc:
                 failure = exc
-            if not failure.retryable:
-                raise CompressionError(str(failure)) from None
-            if attempt == 3:
-                raise CompressionError(f'총 3회 시도 후 실패했습니다. {failure}') from None
-            key_index += 1
-            wait = failure.retry_after if failure.retry_after is not None else 2 ** attempt
-            if wait >= self.total_timeout - (self.clock() - start):
-                raise CompressionError(f'서버 대기 시간이 전체 제한 시간(300초)을 초과합니다. {failure}')
-            retry_at = (datetime.now(timezone.utc) + timedelta(seconds=wait)).isoformat()
-            emit('retry_wait', retry_at=retry_at, message=f'{failure} {wait:g}초 후 다음 키로 재시도합니다.')
-            await self.sleep(wait)
-        raise CompressionError('API 호출 횟수 제한에 도달했습니다.')
+            if failure.action == 'stop':
+                raise fail(str(failure)) from None
+            if failure.action == 'next_key':
+                rejected_keys.add(key)
+                while key_index < len(self.keys) and self.keys[key_index][1] in rejected_keys:
+                    key_index += 1
+                if key_index == len(self.keys):
+                    raise fail(f'사용 가능한 API 키가 모두 소진되었습니다. {failure}') from None
+                message = f'{failure} {model_label(model)}에서 키 {self.keys[key_index][0]}로 전환합니다.'
+            else:
+                model_index += 1
+                if model_index == len(self.models):
+                    raise fail(f'총 {attempt}회 시도 후 모든 후보 모델이 실패했습니다. {failure}') from None
+                message = f'{model_label(model)}: {failure} → {model_label(self.models[model_index])}로 전환합니다.'
+            emit('retry_wait', retry_at=None, message=message)
+        raise fail('API 호출 횟수 제한에 도달했습니다.')

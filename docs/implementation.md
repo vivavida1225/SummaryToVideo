@@ -1,21 +1,23 @@
 # Local market compressor — implementation contract
 
-Approved scope: Vue3/TypeScript/Vite + Python/FastAPI on Windows. Clipboard HTML is default; no default file, no automatic API call on page load. One explicit run serializes HTML, saves and copies it, then compresses with gemini-3.5-flash-lite, validates, saves and copies final text. Numbered keys from existing .env rotate on recoverable failures. Three calls total, 60 seconds/call, 300 seconds overall, 2/4-second retry waits (server hints take precedence). Invalid format gets at most one repair within that budget. Serialized input uses === separators; compressed output is a five-line plain-text narration, isolated per run.
+Approved scope: Vue3/TypeScript/Vite + Python/FastAPI on Windows. Clipboard HTML is default; no default file, no automatic API call on page load. One explicit run serializes HTML, saves and copies it, then compresses, validates, saves and copies valid final text. The model catalog in backend/models.py orders gemini-3.8-flash (default), gemini-3.7-flash, gemini-3.6-flash, gemini-3.5-flash-lite. A job starts at the selected model and only falls forward. Quota, server, connection, empty-response and model-not-found errors switch models immediately using the same key; authentication errors switch keys on the same model. Request errors and safety blocks stop. Keys and the starting model are captured at job creation. Maximum calls = remaining model count + configured key count (including one repair); 60 seconds/call and 300 seconds overall. Invalid output gets at most one repair, whose context survives transport fallback. Serialized input uses === separators; compressed output is a five-line plain-text narration, isolated per run.
 
 ## Shared HTTP contract
 
-- Same-origin server. GET /api/session => {token, model, configured_keys: number[]}. Token in X-App-Token for every other /api route except /api/health. Session fetch must be same-origin (no CORS); backend enforces Host and Origin.
+- Same-origin server. GET /api/session => {token, model, models: [{id, label}], configured_keys: number[]}. model is the server default; models is ordered. Token in X-App-Token for every other /api route except /api/health. Session fetch must be same-origin (no CORS); backend enforces Host and Origin.
 - GET /api/health => {app: "summary-to-video", ready: true, instance_id: string}.
 - GET /api/files => {files: [{path: string, size: number}]} (paths relative to src).
 - POST /api/clipboard/read => {text: string, format: "text"|"html"}.
-- POST /api/jobs body {html: string} OR {file_path: string}, never both; returns Job (202).
+- POST /api/jobs body {html: string, model?: string} OR {file_path: string, model?: string}, never both sources; returns Job (202). Omitted model uses the server default; unsupported models return 422 with a model-specific string detail.
 - GET /api/jobs/{id} => Job.
-- POST /api/jobs/{id}/retry => new Job (202), uses prior serialized snapshot.
+- POST /api/jobs/{id}/retry accepts optional body {model?: string} => new Job (202), uses prior serialized snapshot. Without a model, reuse the original requested_model (legacy model field if absent). The UI sends its current selected model.
 - POST /api/jobs/{id}/copy body {stage: "serialized"|"compressed"} => {ok: true}.
 - GET /api/jobs/{id}/artifacts/{name}: serialized.txt / compressed.txt only. Fetch with token then download Blob; fallback to in-memory content if disk save failed.
 - POST /api/shutdown (token required): graceful local server shutdown, launcher uses this.
 - Errors: {detail: string}, conflicts optionally {detail: string, job_id: string}.
-- Job = {id, parent_id: string|null, state: "queued"|"serializing"|"copying_serialized"|"requesting"|"retry_wait"|"validating"|"copying_compressed"|"completed"|"failed", source: string, created_at: ISO string, elapsed_seconds: number, attempt: number, max_attempts: 3, key_number: number|null, retry_at: ISO|null, serialized: string|null, compressed: string|null, scene_count: number|null, body_char_count: number|null, warnings: string[], error: string|null, output_dir: string, events: [{at: ISO string, message: string}] }.
+- Job = {id, parent_id: string|null, state: "queued"|"serializing"|"copying_serialized"|"requesting"|"retry_wait"|"validating"|"copying_compressed"|"completed"|"failed", source: string, created_at: ISO string, elapsed_seconds: number, attempt: number, max_attempts: number, requested_model: string, model: string, attempted_models: string[], key_number: number|null, retry_at: ISO|null, serialized: string|null, compressed: string|null, scene_count: number|null, body_char_count: number|null, warnings: string[], error: string|null, output_dir: string, events: [{at: ISO string, message: string}] }.
+- requested_model is immutable for each job; model tracks the current/last attempted model. attempted_models contains unique IDs in attempt order. Legacy metadata without requested_model uses model; missing attempted_models defaults to []. Raw/invalid response filenames accept any positive attempt number; draft recovery orders numbers numerically.
+- The System Status select saves its value under localStorage key market-compressor.model; unavailable storage does not block use. Disable selection while loading/submitting/running. Automatic fallback never changes the stored selection. The timeline shows actual model and transition messages; failed drafts are manually recoverable and never automatically copied.
 
 ## Tasks
 
