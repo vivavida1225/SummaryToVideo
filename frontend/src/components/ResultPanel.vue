@@ -9,13 +9,22 @@ const props = defineProps<{
   copyLabel: string
   downloadLabel: string
   busy?: boolean
+  editable?: boolean
+  saveError?: string
   bodyCharCount?: number
   excessCharCount?: number
 }>()
 
 const charCount = computed(() => props.bodyCharCount ?? Array.from(props.value.replace(/[\r\n]/g, '')).length)
 
-defineEmits<{ copy: []; download: [] }>()
+const emit = defineEmits<{ copy: []; download: []; edit: [value: string]; composition: [active: boolean]; retrySave: [] }>()
+function edit(event: Event) {
+  emit('edit', (event.target as HTMLTextAreaElement).value)
+}
+function endComposition(event: CompositionEvent) {
+  edit(event)
+  emit('composition', false)
+}
 </script>
 
 <template>
@@ -28,7 +37,12 @@ defineEmits<{ copy: []; download: [] }>()
       <span class="char-count" title="개행 제외">{{ charCount.toLocaleString('ko-KR') }}자<template v-if="excessCharCount"> · 상한 {{ (charCount - excessCharCount).toLocaleString('ko-KR') }}자보다 {{ excessCharCount.toLocaleString('ko-KR') }}자 초과</template></span>
     </header>
     <label class="sr-only">{{ label }}</label>
-    <textarea :aria-label="label" :value="value" readonly spellcheck="false" />
+    <textarea :aria-label="label" :value="value" :readonly="!editable || busy" spellcheck="false"
+      @input="edit" @compositionstart="emit('composition', true)" @compositionend="endComposition" />
+    <div v-if="saveError" class="inline-error" role="alert">
+      {{ saveError }} 입력한 대본은 유지됩니다.
+      <button class="ghost-button" type="button" :disabled="busy" @click="emit('retrySave')">저장 다시 시도</button>
+    </div>
     <footer>
       <button class="ghost-button" type="button" :disabled="busy" @click="$emit('copy')">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-2M6 7h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z" /></svg>

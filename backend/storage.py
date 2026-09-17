@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .config import MAX_INPUT_BYTES
 from .narration import decode_response
-from .validation import count_characters
+from .validation import MAX_CHARS, count_characters
 
 
 JOB_ID = re.compile(r'\d{8}_\d{6}_\d{6}_[0-9a-f]{8}')
@@ -67,7 +67,7 @@ class ResultStore:
         return path
 
     def write_text(self, job_id: str, name: str, text: str):
-        if not re.fullmatch(r'(?:serialized|compressed|(?:invalid|raw)_response_[1-9]\d*)\.txt|metadata\.json', name):
+        if not re.fullmatch(r'(?:serialized|compressed|(?:invalid|raw)_response_[1-9]\d*)\.txt|(?:metadata|edited_compressed)\.json', name):
             raise ValueError('허용되지 않은 결과 파일입니다.')
         folder = self.directory(job_id)
         folder.mkdir(parents=True, exist_ok=True)
@@ -85,6 +85,12 @@ class ResultStore:
         metadata = {k: v for k, v in job.items() if k not in {'serialized', 'compressed'}}
         self.write_text(job['id'], 'metadata.json', json.dumps(metadata, ensure_ascii=False, indent=2))
 
+    def save_edit(self, job_id: str, text: str, *, revision: int, edited_at: str):
+        # Text and revision commit together with one atomic replace. Keep the generated
+        # compressed.txt as history; API copy/download resolve the latest edit in load().
+        self.write_text(job_id, 'edited_compressed.json', json.dumps(
+            {'text': text, 'revision': revision, 'edited_at': edited_at}, ensure_ascii=False))
+
     def load(self, job_id: str) -> dict:
         folder = self.directory(job_id)
         metadata_path = folder / 'metadata.json'
@@ -95,12 +101,23 @@ class ResultStore:
         job.setdefault('attempted_models', [])
         job.setdefault('validation_issues', [])
         job.setdefault('excess_char_count', 0)
+        job.setdefault('revision', 0)
+        job.setdefault('edited_at', None)
         for stage in ('serialized', 'compressed'):
             path = folder / (stage + '.txt')
             if not path.resolve().is_relative_to(folder):
                 raise ValueError('결과 경로를 확인하세요.')
             job[stage] = path.read_text(encoding='utf-8') if path.exists() else None
-        if job['state'] != 'completed' and not job['compressed']:
+        edit_path = folder / 'edited_compressed.json'
+        if not edit_path.resolve().is_relative_to(folder):
+            raise ValueError('결과 경로를 확인하세요.')
+        if edit_path.exists():
+            edit = json.loads(edit_path.read_text(encoding='utf-8'))
+            text = edit['text']
+            job.update(compressed=text, revision=edit['revision'], edited_at=edit['edited_at'],
+                       body_char_count=count_characters(text),
+                       excess_char_count=max(0, count_characters(text) - MAX_CHARS))
+        if job['state'] != 'completed' and not job['compressed'] and not job['edited_at']:
             # Expose the latest saved draft from older runs without converting files.
             drafts = [path for path in folder.glob('invalid_response_*.txt')
                       if re.fullmatch(r'invalid_response_[1-9]\d*\.txt', path.name)]

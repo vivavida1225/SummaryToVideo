@@ -6,12 +6,12 @@ from datetime import datetime, timezone
 
 from .clipboard import WindowsClipboard
 from .compression import CompressionError, Compressor, ResponseValidationError
-from .config import Settings
+from .config import MAX_INPUT_BYTES, Settings
 from .models import model_candidates
 from .narration import decode_response
 from .serializer import serialize_html
 from .storage import ResultStore, read_source
-from .validation import count_characters
+from .validation import MAX_CHARS, count_characters
 
 
 def now() -> str:
@@ -22,6 +22,10 @@ class JobConflict(Exception):
     def __init__(self, job_id):
         self.job_id = job_id
         super().__init__('이미 진행 중인 작업이 있습니다.')
+
+
+class EditConflict(ValueError):
+    pass
 
 
 class JobManager:
@@ -45,7 +49,8 @@ class JobManager:
                    max_attempts=len(candidates) + len(keys) - int(repair_context is not None), key_number=None,
                    retry_at=None, serialized=None, compressed=None, scene_count=None, body_char_count=None,
                    warnings=[], error=None, output_dir=f'outputs/{job_id}', events=[], model=model,
-                   requested_model=model, attempted_models=[], validation_issues=[], excess_char_count=0)
+                   requested_model=model, attempted_models=[], validation_issues=[], excess_char_count=0,
+                   revision=0, edited_at=None)
         self.jobs[job_id] = job
         self.started[job_id] = time.monotonic()
         self.active_id = job_id
@@ -86,9 +91,30 @@ class JobManager:
         if name not in {'serialized.txt', 'compressed.txt'}:
             raise ValueError('허용되지 않은 결과 파일입니다.')
         text = self.get(job_id)[name.removesuffix('.txt')]
-        if not text:
+        if text is None:
             raise FileNotFoundError('아직 결과가 생성되지 않았습니다.')
         return text
+
+    def update_compressed(self, job_id: str, text: str, *, revision: int) -> dict:
+        original = self.get(job_id)
+        if original['state'] not in ('completed', 'failed', 'needs_review'):
+            raise EditConflict('대본 생성이 끝난 뒤 수정할 수 있습니다.')
+        if original['compressed'] is None:
+            raise ValueError('수정할 대본이 없습니다.')
+        if revision != original.get('revision', 0):
+            raise EditConflict('다른 화면에서 대본이 변경되었습니다. 현재 수정 내용을 별도로 보관한 뒤 새로고침하세요.')
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        if len(text.encode('utf-8')) > MAX_INPUT_BYTES:
+            raise ValueError('대본은 5 MiB 이하만 저장할 수 있습니다.')
+        updated = copy.deepcopy(original)
+        chars = count_characters(text)
+        updated.update(compressed=text, revision=revision + 1, edited_at=now(),
+                       body_char_count=chars, excess_char_count=max(0, chars - MAX_CHARS))
+        # No await between revision check and persistence: competing requests cannot interleave.
+        # Keep generation diagnostics as history; manual edits never invoke the model.
+        self.store.save_edit(job_id, text, revision=updated['revision'], edited_at=updated['edited_at'])
+        self.jobs[job_id] = updated
+        return self.get(job_id)
 
     async def copy_result(self, job_id: str, stage: str):
         text = self.artifact(job_id, stage + '.txt')

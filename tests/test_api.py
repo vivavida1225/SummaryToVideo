@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+import pytest
 
 from backend.app import create_app
 from backend.config import Settings
@@ -20,6 +21,86 @@ def client(tmp_path):
 
 def auth(c):
     return {'X-App-Token': c.get('/api/session').json()['token']}
+
+
+def test_myasset_source_requires_auth_and_defaults_to_30(tmp_path, monkeypatch):
+    calls = []
+    async def fetch(base_date, gubun):
+        calls.append((base_date.isoformat(), gubun))
+        return dict(html='<p>news</p>', source_url='https://www.myasset.com/',
+                    base_date=base_date.isoformat(), gubun=gubun)
+    monkeypatch.setattr('backend.app.fetch_myasset_source', fetch, raising=False)
+    with client(tmp_path) as c:
+        assert c.post('/api/sources/myasset', json={'base_date': '2026-09-17'}).status_code == 403
+        headers = auth(c)
+        response = c.post('/api/sources/myasset', headers=headers, json={'base_date': '2026-09-17'})
+        assert response.status_code == 200
+        assert response.json()['gubun'] == 30
+        response = c.post('/api/sources/myasset', headers=headers, json={'base_date': '2026-09-17', 'gubun': 1})
+        assert response.json()['gubun'] == 1
+        assert calls == [('2026-09-17', 30), ('2026-09-17', 1)]
+        assert not c.app.state.manager.jobs
+
+
+@pytest.mark.parametrize('payload', [
+    {}, {'base_date': '2026-02-30'}, {'base_date': '20260917'}, {'base_date': 1789603200},
+    {'base_date': '2026-9-17'}, {'base_date': '2026-09-17T00:00:00'},
+    *[{'base_date': '2026-09-17', 'gubun': value} for value in [-1, True, 1.5, '1', None]],
+    {'base_date': '2026-09-17', 'url': 'https://example.com'},
+])
+def test_myasset_rejects_invalid_settings_before_fetch(tmp_path, monkeypatch, payload):
+    async def unexpected(*args):
+        pytest.fail('Invalid input reached external fetch')
+    monkeypatch.setattr('backend.app.fetch_myasset_source', unexpected, raising=False)
+    with client(tmp_path) as c:
+        response = c.post('/api/sources/myasset', headers=auth(c), json=payload)
+        assert response.status_code == 422
+        assert isinstance(response.json()['detail'], str)
+        assert 'gubun' in response.json()['detail']
+
+
+@pytest.mark.parametrize('status', [404, 413, 502, 504])
+def test_myasset_errors_preserve_string_detail_without_starting_job(tmp_path, monkeypatch, status):
+    from backend.myasset import MyassetError
+    async def fetch(*args):
+        raise MyassetError(status, '원문을 가져올 수 없습니다.')
+    monkeypatch.setattr('backend.app.fetch_myasset_source', fetch)
+    with client(tmp_path) as c:
+        response = c.post('/api/sources/myasset', headers=auth(c), json={'base_date': '2026-09-17'})
+        assert response.status_code == status
+        assert response.json() == {'detail': '원문을 가져올 수 없습니다.'}
+        assert not c.app.state.manager.jobs
+
+
+def test_myasset_html_reaches_existing_job_pipeline(tmp_path, tiny_html, compressed, monkeypatch):
+    import httpx
+    from backend import myasset
+    from backend.gemini import GeminiTransport
+    from backend.serializer import serialize_html
+    original_client = httpx.AsyncClient
+    transport = httpx.MockTransport(lambda request: httpx.Response(200,
+        headers={'Content-Type': 'text/html'}, text='<div class="contWrap">' + tiny_html + '</div>'))
+    monkeypatch.setattr(myasset.httpx, 'AsyncClient', lambda **kwargs: original_client(transport=transport, **kwargs))
+    sources = []
+    async def generate(self, **kwargs):
+        sources.append(kwargs['source'])
+        return compressed
+    monkeypatch.setattr(GeminiTransport, 'generate', generate)
+    (tmp_path / '.env').write_text('GEMINI_API_KEY_1=fake', encoding='utf-8')
+    (tmp_path / 'prompts').mkdir()
+    (tmp_path / 'prompts/compress_to_1min.txt').write_text('instructions', encoding='utf-8')
+    with client(tmp_path) as c:
+        headers = auth(c)
+        imported = c.post('/api/sources/myasset', headers=headers, json={'base_date': '2026-09-17', 'gubun': 1})
+        assert imported.status_code == 200
+        assert not c.app.state.manager.jobs
+        created = c.post('/api/jobs', headers=headers, json={'html': imported.json()['html']})
+        assert created.status_code == 202
+        c.portal.call(c.app.state.manager.wait, created.json()['id'])
+        job = c.get('/api/jobs/' + created.json()['id'], headers=headers).json()
+        assert sources == [serialize_html(tiny_html)]
+        assert job['state'] == 'completed'
+        assert job['compressed'] == compressed
 
 
 def test_session_catalog_and_job_model_validation(tmp_path):

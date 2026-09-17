@@ -1,6 +1,8 @@
 import asyncio
 import secrets
+import re
 from contextlib import asynccontextmanager
+from datetime import date
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
@@ -12,8 +14,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .config import MAX_INPUT_BYTES, Settings
-from .jobs import JobConflict, JobManager
+from .jobs import EditConflict, JobConflict, JobManager
 from .models import MODELS, model_candidates
+from .myasset import MyassetError, fetch_myasset_source
 from .storage import list_sources, source_path
 
 
@@ -42,6 +45,32 @@ class JobInput(ModelInput):
 
 class CopyInput(BaseModel):
     stage: Literal['serialized', 'compressed']
+
+
+class EditCompressedInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    text: str = Field(max_length=MAX_INPUT_BYTES)
+    revision: int = Field(ge=0, strict=True)
+
+
+class MyassetInput(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    base_date: date
+    gubun: int = Field(default=30, strict=True, ge=0)
+
+    @field_validator('base_date', mode='before')
+    @classmethod
+    def calendar_date(cls, value):
+        if not isinstance(value, str) or not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', value):
+            raise ValueError('날짜는 YYYY-MM-DD 형식이어야 합니다.')
+        return date.fromisoformat(value)
+
+
+class MyassetSource(BaseModel):
+    html: str
+    source_url: str
+    base_date: str
+    gubun: int
 
 
 def create_app(settings: Settings | None = None, *, clipboard=None, compressor_factory=None,
@@ -101,6 +130,10 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
 
     @app.exception_handler(RequestValidationError)
     async def invalid_request(_request, exc):
+        if _request.url.path.endswith('/compressed'):
+            return JSONResponse({'detail': '대본 문자열과 저장 버전을 확인하세요. 대본은 5 MiB 이하만 지원합니다.'}, status_code=422)
+        if _request.url.path == '/api/sources/myasset':
+            return JSONResponse({'detail': '날짜(YYYY-MM-DD)와 gubun(0 이상의 정수) 입력 형식을 확인하세요.'}, status_code=422)
         if any('model' in error['loc'] for error in exc.errors()):
             return JSONResponse({'detail': '지원하지 않는 모델입니다. 모델 목록에서 다시 선택하세요.'}, status_code=422)
         return JSONResponse({'detail': '입력 형식을 확인하세요. HTML 또는 파일 경로 중 하나만 지정해야 합니다.'}, status_code=422)
@@ -124,6 +157,13 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
             return await asyncio.to_thread(manager.clipboard.read)
         except (OSError, ValueError):
             raise HTTPException(503, '클립보드를 읽지 못했습니다. 다시 읽기를 누르거나 HTML을 직접 붙여넣으세요.') from None
+
+    @app.post('/api/sources/myasset', response_model=MyassetSource)
+    async def myasset_source(data: MyassetInput):
+        try:
+            return await fetch_myasset_source(data.base_date, data.gubun)
+        except MyassetError as exc:
+            raise HTTPException(exc.status_code, exc.detail) from None
 
     @app.post('/api/jobs', status_code=202)
     async def start_job(data: JobInput):
@@ -155,6 +195,18 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
             return manager.retry(job_id, model=data.model if data else None)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from None
+
+    @app.post('/api/jobs/{job_id}/compressed')
+    async def edit_compressed(job_id: str, data: EditCompressedInput):
+        find_job(job_id)
+        try:
+            return manager.update_compressed(job_id, data.text, revision=data.revision)
+        except EditConflict as exc:
+            raise HTTPException(409, str(exc)) from None
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+        except OSError:
+            raise HTTPException(503, '수정한 대본을 저장하지 못했습니다. 입력 내용을 유지한 채 다시 저장하세요.') from None
 
     @app.post('/api/jobs/{job_id}/copy')
     async def copy_result(job_id: str, data: CopyInput):

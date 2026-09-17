@@ -31,6 +31,8 @@ export interface Job {
   retry_at: string | null
   serialized: string | null
   compressed: string | null
+  revision?: number
+  edited_at?: string | null
   scene_count: number | null
   body_char_count: number | null
   excess_char_count?: number
@@ -56,4 +58,11 @@ export interface ModelOption {
 export interface SourceFile {
   path: string
   size: number
+}
+
+export interface MyassetSource {
+  html: string
+  source_url: string
+  base_date: string
+  gubun: number
 }

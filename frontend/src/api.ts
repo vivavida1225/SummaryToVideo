@@ -1,4 +1,4 @@
-import type { Job, SessionInfo, SourceFile } from './types'
+import type { Job, MyassetSource, SessionInfo, SourceFile } from './types'
 
 interface ApiErrorBody {
   detail?: string
@@ -46,6 +46,10 @@ export async function bootstrapSession(): Promise<SessionInfo> {
 }
 
 export const api = {
+  myassetSource(baseDate: string, gubun: number): Promise<MyassetSource> {
+    return request('/api/sources/myasset', { method: 'POST', body: JSON.stringify({ base_date: baseDate, gubun }) })
+  },
+
   async files(): Promise<SourceFile[]> {
     const response = await request<{ files: SourceFile[] }>('/api/files')
     return response.files
@@ -61,6 +65,12 @@ export const api = {
 
   job(id: string): Promise<Job> {
     return request(`/api/jobs/${encodeURIComponent(id)}`)
+  },
+
+  saveCompressed(id: string, text: string, revision: number): Promise<Job> {
+    return request(`/api/jobs/${encodeURIComponent(id)}/compressed`, {
+      method: 'POST', body: JSON.stringify({ text, revision }),
+    })
   },
 
   retry(id: string, model?: string): Promise<Job> {

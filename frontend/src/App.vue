@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { api, ApiError, bootstrapSession } from './api'
 import ResultPanel from './components/ResultPanel.vue'
@@ -20,13 +20,42 @@ const selectedFile = ref('')
 const job = ref<Job | null>(null)
 const loading = ref(true)
 const actionBusy = ref(false)
+const fetchingMyasset = ref(false)
+const myassetSettingsOpen = ref(false)
+const myassetSettingsButton = ref<HTMLButtonElement | null>(null)
+const myassetSettingsPanel = ref<HTMLDivElement | null>(null)
+const todayParts = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',
+}).formatToParts(new Date())
+const myassetDate = ref(['year', 'month', 'day'].map(part => todayParts.find(item => item.type === part)!.value).join('-'))
+const myassetGubun = ref<number | string>(30)
 const pageError = ref('')
 const sourceError = ref('')
 const announcement = ref('')
+const compressedDraft = ref('')
+const savedCompressed = ref('')
+const savingCompressed = ref(false)
+const compressedSaveError = ref('')
+const composingCompressed = ref(false)
+let saveQueue: Promise<void> | null = null
+const compressedDirty = computed(() => compressedDraft.value !== savedCompressed.value)
+const manuallyEdited = computed(() => !!job.value?.edited_at || compressedDirty.value)
+const draftCharCount = computed(() => Array.from(compressedDraft.value.replace(/[\r\n]/g, '')).length)
 let pollTimer: number | undefined
 let disposed = false
 
 const isRunning = computed(() => job.value !== null && !TERMINAL_STATES.has(job.value.state))
+const inputBusy = computed(() => loading.value || actionBusy.value || isRunning.value)
+const myassetSettingsError = computed(() => {
+  const date = myassetDate.value
+  const parsed = new Date(`${date}T00:00:00Z`)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date.startsWith('0000') || Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== date) {
+    return '날짜를 YYYY-MM-DD 형식의 유효한 날짜로 입력하세요.'
+  }
+  const gubun = myassetGubun.value
+  if (gubun === '' || !Number.isSafeInteger(Number(gubun)) || Number(gubun) < 0) return 'gubun은 0 이상의 정수로 입력하세요.'
+  return ''
+})
 const canRun = computed(() => {
   if (loading.value || actionBusy.value || isRunning.value || !selectedModel.value) return false
   return sourceMode.value === 'clipboard' ? clipboardText.value.trim().length > 0 : selectedFile.value.length > 0
@@ -59,8 +88,60 @@ function rememberModel() {
 }
 
 function rememberJob(nextJob: Job) {
+  if (job.value?.id !== nextJob.id || !compressedDirty.value) {
+    compressedDraft.value = nextJob.compressed ?? ''
+    savedCompressed.value = nextJob.compressed ?? ''
+    compressedSaveError.value = ''
+  }
   job.value = nextJob
   writeStored('sessionStorage', JOB_STORAGE_KEY, nextJob.id)
+}
+
+function editCompressed(text: string) {
+  compressedDraft.value = text
+  if (!composingCompressed.value) void flushCompressed().catch(() => {})
+}
+
+function composeCompressed(active: boolean) {
+  composingCompressed.value = active
+  if (!active) void flushCompressed().catch(() => {})
+}
+
+async function flushCompressed(): Promise<void> {
+  if (composingCompressed.value) throw new Error('한글 입력을 완료한 뒤 다시 시도하세요.')
+  if (saveQueue) return saveQueue
+  if (!compressedDirty.value || !job.value) return
+  const id = job.value.id
+  savingCompressed.value = true
+  compressedSaveError.value = ''
+  saveQueue = (async () => {
+    while (!disposed && job.value?.id === id && compressedDirty.value && !composingCompressed.value) {
+      const text = compressedDraft.value
+      const saved = await api.saveCompressed(id, text, job.value.revision ?? 0)
+      if (disposed || job.value?.id !== id) return
+      // A response acknowledges only its snapshot; never replace newer local input.
+      job.value = saved
+      savedCompressed.value = saved.compressed ?? ''
+    }
+    if (composingCompressed.value) throw new Error('한글 입력을 완료한 뒤 다시 시도하세요.')
+  })().catch(error => {
+    compressedSaveError.value = friendlyError(error)
+    throw error
+  }).finally(() => {
+    savingCompressed.value = false
+    saveQueue = null
+  })
+  return saveQueue
+}
+
+function retryCompressedSave() {
+  void flushCompressed().catch(() => {})
+}
+
+function warnUnsaved(event: BeforeUnloadEvent) {
+  if (!compressedDirty.value && !savingCompressed.value) return
+  event.preventDefault()
+  event.returnValue = ''
 }
 
 function stopPolling() {
@@ -120,6 +201,8 @@ async function recoverJob(id: string) {
 }
 
 onMounted(async () => {
+  window.addEventListener('beforeunload', warnUnsaved)
+  document.addEventListener('click', dismissMyassetSettings, true)
   try {
     session.value = await bootstrapSession()
     const savedModel = readStored('localStorage', MODEL_STORAGE_KEY)
@@ -144,6 +227,8 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', warnUnsaved)
+  document.removeEventListener('click', dismissMyassetSettings, true)
   disposed = true
   stopPolling()
 })
@@ -184,16 +269,70 @@ async function runJob() {
   pageError.value = ''
   actionBusy.value = true
   try {
+    await flushCompressed()
     const source = sourceMode.value === 'clipboard'
       ? { html: clipboardText.value }
       : { file_path: selectedFile.value }
-    const created = await api.createJob({ ...source, model: selectedModel.value })
+    await submitJob(source, selectedModel.value)
+  } catch (error) {
+    pageError.value = friendlyError(error)
+  } finally {
+    actionBusy.value = false
+  }
+}
+
+function dismissMyassetSettings(event: MouseEvent) {
+  if (!myassetSettingsOpen.value || !(event.target instanceof Node)) return
+  if (myassetSettingsPanel.value?.contains(event.target) || myassetSettingsButton.value?.contains(event.target)) return
+  myassetSettingsOpen.value = false
+}
+
+async function closeMyassetSettings() {
+  myassetSettingsOpen.value = false
+  await nextTick()
+  myassetSettingsButton.value?.focus()
+}
+
+async function loadMyasset() {
+  if (inputBusy.value || !selectedModel.value || myassetSettingsError.value) return
+  const baseDate = myassetDate.value
+  const gubun = Number(myassetGubun.value)
+  const model = selectedModel.value
+  actionBusy.value = true
+  fetchingMyasset.value = true
+  sourceError.value = ''
+  try {
+    await flushCompressed()
+    const source = await api.myassetSource(baseDate, gubun)
+    if (disposed) return
+    sourceMode.value = 'clipboard'
+    clipboardFormat.value = 'html'
+    clipboardText.value = source.html
+    announcement.value = 'myasset 원문을 불러왔습니다. 변환 및 압축을 시작합니다.'
+    await nextTick()
+    if (disposed) return
+    pageError.value = ''
+    await submitJob({ html: source.html }, model)
+  } catch (error) {
+    if (!disposed) sourceError.value = friendlyError(error)
+  } finally {
+    fetchingMyasset.value = false
+    actionBusy.value = false
+  }
+}
+
+async function submitJob(source: { html: string } | { file_path: string }, model: string): Promise<void> {
+  try {
+    const created = await api.createJob({ ...source, model })
+    if (disposed) return
     rememberJob(created)
     schedulePoll()
   } catch (error) {
+    if (disposed) return
     if (error instanceof ApiError && error.status === 409 && error.jobId) {
       try {
         const activeJob = await api.job(error.jobId)
+        if (disposed) return
         rememberJob(activeJob)
         schedulePoll()
         pageError.value = '이미 진행 중인 작업을 이어서 표시합니다.'
@@ -204,8 +343,6 @@ async function runJob() {
       }
     }
     sourceError.value = friendlyError(error)
-  } finally {
-    actionBusy.value = false
   }
 }
 
@@ -214,6 +351,7 @@ async function retryJob() {
   actionBusy.value = true
   pageError.value = ''
   try {
+    await flushCompressed()
     const retried = await api.retry(job.value.id, selectedModel.value)
     rememberJob(retried)
     schedulePoll()
@@ -229,6 +367,7 @@ async function copyResult(stage: 'serialized' | 'compressed') {
   actionBusy.value = true
   pageError.value = ''
   try {
+    if (stage === 'compressed') await flushCompressed()
     await api.copy(job.value.id, stage)
     announcement.value = stage === 'serialized' ? '직렬화 원문을 클립보드에 복사했습니다.' : '압축 결과를 클립보드에 복사했습니다.'
   } catch (error) {
@@ -244,6 +383,7 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
   pageError.value = ''
   const name = stage === 'serialized' ? 'serialized.txt' : 'compressed.txt'
   try {
+    if (stage === 'compressed') await flushCompressed()
     const blob = await api.artifact(job.value.id, name)
     const href = URL.createObjectURL(blob)
     const link = document.createElement('a')
@@ -303,15 +443,35 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
 
       <div class="workspace-grid">
         <section class="source-card" aria-labelledby="source-heading">
-          <div class="section-heading">
+          <div class="section-heading source-heading">
             <span class="step-number">01</span>
             <div>
               <p class="eyebrow">SOURCE</p>
               <h2 id="source-heading">원문 선택</h2>
             </div>
+            <div class="myasset-actions">
+              <button class="ghost-button myasset-load" type="button"
+                :disabled="inputBusy || !selectedModel || !!myassetSettingsError" @click="loadMyasset">
+                {{ fetchingMyasset ? 'myasset에서 불러오는 중…' : 'myasset에서 불러오기' }}
+              </button>
+              <div class="myasset-settings" @keydown.esc.stop.prevent="closeMyassetSettings">
+                <button ref="myassetSettingsButton" class="ghost-button" type="button"
+                  :disabled="inputBusy" :aria-expanded="myassetSettingsOpen" aria-controls="myasset-settings-panel"
+                  @click="myassetSettingsOpen = !myassetSettingsOpen">불러오기 설정</button>
+                <div v-if="myassetSettingsOpen" ref="myassetSettingsPanel" id="myasset-settings-panel" class="myasset-settings-panel"
+                  role="group" aria-label="myasset 불러오기 설정">
+                  <label for="myasset-date">날짜</label>
+                  <input id="myasset-date" v-model="myassetDate" type="date" :disabled="inputBusy" />
+                  <label for="myasset-gubun">gubun</label>
+                  <input id="myasset-gubun" v-model="myassetGubun" type="number" min="0" step="1" :disabled="inputBusy" />
+                  <p class="field-note">선택한 원문을 불러온 뒤 변환 및 압축을 자동 시작합니다.</p>
+                </div>
+              </div>
+            </div>
           </div>
+          <p v-if="myassetSettingsError" class="inline-error" role="alert">{{ myassetSettingsError }}</p>
 
-          <fieldset class="source-tabs" :disabled="loading || isRunning">
+          <fieldset class="source-tabs" :disabled="inputBusy">
             <legend class="sr-only">원문 가져올 곳</legend>
             <label :class="{ selected: sourceMode === 'clipboard' }">
               <input v-model="sourceMode" type="radio" value="clipboard" />
@@ -338,7 +498,7 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
             <textarea
               id="clipboard-source"
               v-model="clipboardText"
-              :disabled="loading || isRunning"
+              :disabled="inputBusy"
               placeholder="클립보드의 시장 요약이 여기에 표시됩니다. 직접 붙여넣거나 수정할 수도 있습니다."
               spellcheck="false"
             />
@@ -355,7 +515,7 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
               </div>
             </div>
             <div class="select-wrap">
-              <select id="file-source" v-model="selectedFile" :disabled="loading || isRunning || files.length === 0">
+              <select id="file-source" v-model="selectedFile" :disabled="inputBusy || files.length === 0">
                 <option value="" disabled>{{ files.length === 0 ? '사용할 수 있는 파일이 없습니다' : '파일을 선택하세요' }}</option>
                 <option v-for="file in files" :key="file.path" :value="file.path">
                   {{ file.path }} · {{ fileSize(file.size) }}
@@ -384,35 +544,38 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
           </section>
 
           <div v-if="job?.state === 'failed'" class="failure-card" role="alert">
+            <p v-if="manuallyEdited">아래 안내는 생성 당시 기록입니다. 수정한 대본은 자동 재검증하지 않습니다.</p>
             <strong>작업 중 문제가 생겼습니다</strong>
             <p>{{ job.error || '작업을 완료하지 못했습니다.' }}</p>
             <button v-if="job.serialized" type="button" :disabled="loading || actionBusy" @click="retryJob">압축 다시 시도</button>
           </div>
           <div v-if="job?.state === 'needs_review'" class="failure-card review-card" role="alert">
+            <p v-if="manuallyEdited">아래 안내는 생성 당시 기록입니다. 수정한 대본은 자동 재검증하지 않습니다.</p>
             <strong>생성된 대본의 분량을 확인하세요</strong>
             <p>자동 보정을 멈췄습니다. 대본을 확인한 뒤 필요한 경우 재생성을 눌러 주세요.</p>
             <ul>
               <li v-for="(issue, index) in job.validation_issues ?? []" :key="index">{{ issue }}</li>
             </ul>
-            <button v-if="job.serialized && job.compressed" type="button" :disabled="loading || actionBusy" @click="retryJob">대본 재생성</button>
+            <button v-if="job.serialized && job.compressed !== null" type="button" :disabled="loading || actionBusy" @click="retryJob">대본 재생성</button>
           </div>
         </aside>
       </div>
 
-      <section v-if="job && (job.serialized || job.compressed)" class="results" aria-labelledby="results-heading">
+      <section v-if="job && (job.serialized || job.compressed !== null)" class="results" aria-labelledby="results-heading">
         <header class="results-heading">
           <div>
             <p class="eyebrow">OUTPUT</p>
             <h2 id="results-heading">작업 결과</h2>
           </div>
           <div v-if="job.state === 'completed'" class="result-stats">
-            <span v-if="job.scene_count !== null">입력 {{ job.scene_count }}개 → 최종 5줄 대본</span>
-            <span v-if="job.body_char_count !== null">본문 {{ job.body_char_count.toLocaleString('ko-KR') }}자</span>
+            <span v-if="job.scene_count !== null">입력 {{ job.scene_count }}개 → {{ manuallyEdited ? '수정한 대본' : '최종 5줄 대본' }}</span>
+            <span v-if="job.body_char_count !== null">본문 {{ (manuallyEdited ? draftCharCount : job.body_char_count).toLocaleString('ko-KR') }}자</span>
             <span>{{ job.elapsed_seconds.toFixed(1) }}초 소요</span>
           </div>
         </header>
 
         <ul v-if="job.warnings.length" class="warning-list" aria-label="검토 안내">
+          <li v-if="manuallyEdited">생성 당시 검토 기록이며 수정한 대본의 검증 결과가 아닙니다.</li>
           <li v-for="warning in job.warnings" :key="warning">{{ warning }}</li>
         </ul>
 
@@ -430,16 +593,21 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
             @download="downloadResult('serialized')"
           />
           <ResultPanel
-            v-if="job.compressed"
-            :title="job.state === 'needs_review' ? '생성된 대본 · 분량 확인 필요' : job.state === 'failed' ? '검증 실패 대본' : '최종 5줄 영상 대본'"
+            v-if="job.compressed !== null"
+            :title="manuallyEdited ? '수정한 영상 대본' : job.state === 'needs_review' ? '생성된 대본 · 분량 확인 필요' : job.state === 'failed' ? '검증 실패 대본' : '최종 5줄 영상 대본'"
             eyebrow="COMPRESSED"
-            :value="job.compressed"
-            :body-char-count="job.body_char_count ?? undefined"
-            :excess-char-count="job.excess_char_count"
+            :value="compressedDraft"
+            :body-char-count="manuallyEdited ? draftCharCount : job.body_char_count ?? undefined"
+            :excess-char-count="manuallyEdited ? Math.max(0, draftCharCount - 550) : job.excess_char_count"
+            :editable="!loading && !isRunning"
+            :save-error="compressedSaveError"
             label="압축 결과"
             copy-label="압축 결과 복사"
             download-label="압축 결과 다운로드"
             :busy="actionBusy"
+            @edit="editCompressed"
+            @composition="composeCompressed"
+            @retry-save="retryCompressedSave"
             @copy="copyResult('compressed')"
             @download="downloadResult('compressed')"
           />

@@ -71,6 +71,133 @@ async function finishBootstrap() {
 }
 
 describe('App', () => {
+  it('저장 중 원래 내용으로 되돌려도 미완료 요청이 있으면 이탈 경고를 유지한다', async () => {
+    sessionStorage.setItem('market-compressor.job-id', 'job-1')
+    const original = makeJob({ state: 'completed', compressed: '원본' })
+    installBootstrapFetch(path => path.endsWith('/compressed') ? new Promise<Response>(() => {}) : jsonResponse(original))
+    render(App)
+    const input = await screen.findByRole('textbox', { name: '압축 결과' })
+    await waitFor(() => expect(input).not.toHaveAttribute('readonly'))
+    await fireEvent.update(input, '수정')
+    await fireEvent.update(input, '원본')
+    const event = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(event)
+    expect(event.defaultPrevented).toBe(true)
+  })
+
+  it.each([
+    ['압축 결과 다운로드', '/api/jobs/job-1/artifacts/compressed.txt'],
+    ['변환 및 1분 압축', '/api/jobs'],
+    ['myasset에서 불러오기', '/api/sources/myasset'],
+    ['대본 재생성', '/api/jobs/job-1/retry'],
+  ])('%s는 최신 편집 저장 응답 뒤에만 실행된다', async (buttonName, target) => {
+    sessionStorage.setItem('market-compressor.job-id', 'job-1')
+    const original = makeJob({ state: 'needs_review', serialized: '원문', compressed: '원본' })
+    let completeSave!: (response: Response) => void
+    const fetchMock = installBootstrapFetch(path => {
+      if (path.endsWith('/compressed')) return new Promise<Response>(resolve => { completeSave = resolve })
+      if (path.endsWith('/artifacts/compressed.txt')) return new Response('수정')
+      if (path === '/api/sources/myasset') return jsonResponse({ html: '<p>원문</p>' })
+      return jsonResponse(original)
+    })
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:download'), revokeObjectURL: vi.fn() }))
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    render(App)
+    const input = await screen.findByRole('textbox', { name: '압축 결과' })
+    await waitFor(() => expect(input).not.toHaveAttribute('readonly'))
+    await fireEvent.update(screen.getByRole('textbox', { name: '클립보드 HTML 원문' }), '<p>입력</p>')
+    await fireEvent.update(input, '수정')
+    await fireEvent.click(screen.getByRole('button', { name: buttonName }))
+    expect(fetchMock.mock.calls.some(([request]) => requestPath(request) === target)).toBe(false)
+    completeSave(jsonResponse({ ...original, compressed: '수정', revision: 1, edited_at: 'now' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([request]) => requestPath(request) === target)).toBe(true))
+  })
+
+  it('편집 대본 저장을 순서대로 합치며 오래된 응답이 최신 입력을 덮지 않고 복사는 저장을 기다린다', async () => {
+    sessionStorage.setItem('market-compressor.job-id', 'job-1')
+    const original = makeJob({ state: 'completed', serialized: '원문', compressed: '원본 대본' })
+    const saves: Array<{ body: { text: string; revision: number }; resolve: (response: Response) => void }> = []
+    const fetchMock = installBootstrapFetch((path, init) => {
+      if (path.endsWith('/compressed')) return new Promise<Response>(resolve => saves.push({ body: JSON.parse(String(init.body)), resolve }))
+      if (path.endsWith('/copy')) return jsonResponse({ ok: true })
+      return jsonResponse(original)
+    })
+    render(App)
+    const input = await screen.findByRole('textbox', { name: '압축 결과' })
+    await waitFor(() => expect(input).not.toHaveAttribute('readonly'))
+    await fireEvent.update(input, '첫 수정')
+    await waitFor(() => expect(saves).toHaveLength(1))
+    await fireEvent.update(input, '두 번째')
+    await fireEvent.update(input, '최신 😀 대본')
+    expect(saves).toHaveLength(1)
+    await fireEvent.click(screen.getByRole('button', { name: '압축 결과 복사' }))
+    expect(fetchMock.mock.calls.some(([request]) => requestPath(request).endsWith('/copy'))).toBe(false)
+    saves[0]!.resolve(jsonResponse({ ...original, compressed: '첫 수정', revision: 1, edited_at: 'now' }))
+    await waitFor(() => expect(saves).toHaveLength(2))
+    expect(input).toHaveValue('최신 😀 대본')
+    expect(saves[1]!.body).toEqual({ text: '최신 😀 대본', revision: 1 })
+    saves[1]!.resolve(jsonResponse({ ...original, compressed: '최신 😀 대본', revision: 2, edited_at: 'now' }))
+    await screen.findByText('압축 결과를 클립보드에 복사했습니다.')
+    expect(screen.getByText('수정한 영상 대본')).toBeInTheDocument()
+  })
+
+  it.each([409, 503])('저장 오류 %s에서 편집값을 유지하고 복사를 중단하며 명시적 저장 재시도가 가능하다', async status => {
+    sessionStorage.setItem('market-compressor.job-id', 'job-1')
+    const original = makeJob({ state: 'completed', compressed: '원본' })
+    let failing = true
+    const fetchMock = installBootstrapFetch(path => {
+      if (path.endsWith('/compressed')) return failing ? jsonResponse({ detail: '저장 실패' }, status) : jsonResponse({ ...original, compressed: '', revision: 1, edited_at: 'now' })
+      if (path.endsWith('/copy')) return jsonResponse({ ok: true })
+      return jsonResponse(original)
+    })
+    render(App)
+    const input = await screen.findByRole('textbox', { name: '압축 결과' })
+    await waitFor(() => expect(input).not.toHaveAttribute('readonly'))
+    await fireEvent.update(input, '')
+    await screen.findByRole('button', { name: '저장 다시 시도' })
+    expect(input).toHaveValue('')
+    const unload = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(unload)
+    expect(unload.defaultPrevented).toBe(true)
+    await fireEvent.click(screen.getByRole('button', { name: '압축 결과 복사' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: '압축 결과 복사' })).toBeEnabled())
+    expect(fetchMock.mock.calls.some(([request]) => requestPath(request).endsWith('/copy'))).toBe(false)
+    failing = false
+    await fireEvent.click(screen.getByRole('button', { name: '저장 다시 시도' }))
+    await waitFor(() => {
+      const event = new Event('beforeunload', { cancelable: true })
+      window.dispatchEvent(event)
+      expect(event.defaultPrevented).toBe(false)
+    })
+    expect(input).toHaveValue('')
+    expect(input).not.toHaveAttribute('readonly')
+    const savedUnload = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(savedUnload)
+    expect(savedUnload.defaultPrevented).toBe(false)
+  })
+
+  it('한글 조합 중에는 저장하지 않고 조합 완료 후 전체 문장을 저장한다', async () => {
+    sessionStorage.setItem('market-compressor.job-id', 'job-1')
+    const original = makeJob({ state: 'completed', compressed: '원본' })
+    const fetchMock = installBootstrapFetch((path, init) => path.endsWith('/compressed')
+      ? jsonResponse({ ...original, compressed: JSON.parse(String(init.body)).text, revision: 1, edited_at: 'now' })
+      : jsonResponse(original))
+    render(App)
+    const input = await screen.findByRole('textbox', { name: '압축 결과' })
+    await waitFor(() => expect(input).not.toHaveAttribute('readonly'))
+    await fireEvent.compositionStart(input)
+    await fireEvent.update(input, 'ㅎ')
+    expect(fetchMock.mock.calls.some(([request]) => requestPath(request).endsWith('/compressed'))).toBe(false)
+    await fireEvent.compositionEnd(input, { target: { value: '한글' } })
+    await waitFor(() => {
+      const event = new Event('beforeunload', { cancelable: true })
+      window.dispatchEvent(event)
+      expect(event.defaultPrevented).toBe(false)
+    })
+    const call = fetchMock.mock.calls.find(([request]) => requestPath(request).endsWith('/compressed'))
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ text: '한글', revision: 0 })
+  })
+
   beforeEach(() => {
     sessionStorage.clear()
     localStorage.clear()
@@ -80,6 +207,166 @@ describe('App', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
+  })
+
+  it('설정창 내부 클릭은 유지하고 바깥 클릭은 닫으며 설정 버튼으로 다시 열 수 있다', async () => {
+    installBootstrapFetch(() => jsonResponse({ detail: 'unexpected' }, 500))
+    render(App)
+    await finishBootstrap()
+    const settings = screen.getByRole('button', { name: '불러오기 설정' })
+    await fireEvent.click(settings)
+    await fireEvent.click(screen.getByLabelText('gubun'))
+    expect(settings).toHaveAttribute('aria-expanded', 'true')
+    await fireEvent.update(screen.getByLabelText('gubun'), '1')
+    await fireEvent.click(screen.getByRole('heading', { name: '영상 원고 만들기' }))
+    expect(settings).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByLabelText('gubun')).not.toBeInTheDocument()
+    await fireEvent.click(settings)
+    expect(screen.getByLabelText('gubun')).toHaveValue(1)
+    await fireEvent.click(settings)
+    expect(settings).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('myasset 설정은 한국 시간 오늘과 30으로 시작하고 변경만으로 요청하지 않는다', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-16T15:30:00Z'))
+    const fetchMock = installBootstrapFetch(() => jsonResponse({}, 404))
+    const { unmount } = render(App)
+    await finishBootstrap()
+    const settings = screen.getByRole('button', { name: '불러오기 설정' })
+    await fireEvent.click(settings)
+    expect(screen.getByLabelText('날짜')).toHaveValue('2026-09-17')
+    expect(screen.getByLabelText('gubun')).toHaveValue(30)
+    await fireEvent.update(screen.getByLabelText('gubun'), '1')
+    await fireEvent.keyDown(screen.getByLabelText('gubun'), { key: 'Escape' })
+    expect(settings).toHaveAttribute('aria-expanded', 'false')
+    expect(settings).toHaveFocus()
+    expect(fetchMock.mock.calls.some(([request]) => requestPath(request) === '/api/sources/myasset')).toBe(false)
+    unmount()
+    render(App)
+    await finishBootstrap()
+    await fireEvent.click(screen.getByRole('button', { name: '불러오기 설정' }))
+    expect(screen.getByLabelText('gubun')).toHaveValue(30)
+    expect(screen.getByLabelText('날짜')).toHaveValue('2026-09-17')
+  })
+
+  it('myasset HTML을 파일 탭에서 불러와 선택 모델로 한 번 자동 실행한다', async () => {
+    const html = '<article>가져온 원문</article>'
+    const fetchMock = installBootstrapFetch((path) => {
+      if (path === '/api/sources/myasset') return jsonResponse({ html, source_url: 'https://www.myasset.com', base_date: '2026-09-17', gubun: 1 })
+      if (path === '/api/jobs') return jsonResponse(makeJob({ state: 'needs_review', serialized: '정돈된 원문', compressed: '검토 대본', validation_issues: ['분량 확인'] }))
+      return jsonResponse({}, 404)
+    })
+    render(App)
+    await finishBootstrap()
+    await fireEvent.click(screen.getByRole('radio', { name: '저장된 파일' }))
+    await fireEvent.update(screen.getByRole('combobox', { name: 'HTML 파일 선택' }), '오늘 시장.html')
+    await fireEvent.update(screen.getByRole('combobox', { name: '시작 모델' }), 'gemini-3.7-flash')
+    await fireEvent.click(screen.getByRole('button', { name: '불러오기 설정' }))
+    await fireEvent.update(screen.getByLabelText('날짜'), '2026-09-17')
+    await fireEvent.update(screen.getByLabelText('gubun'), '1')
+    await fireEvent.click(screen.getByRole('button', { name: 'myasset에서 불러오기' }))
+    expect(await screen.findByRole('textbox', { name: '클립보드 HTML 원문' })).toHaveValue(html)
+    await screen.findByText('생성된 대본의 분량을 확인하세요')
+    const imports = fetchMock.mock.calls.filter(([request]) => requestPath(request) === '/api/sources/myasset')
+    expect(JSON.parse(String(imports[0]?.[1]?.body))).toEqual({ base_date: '2026-09-17', gubun: 1 })
+    expect(new Headers(imports[0]?.[1]?.headers).get('X-App-Token')).toBe('session-token')
+    const jobs = fetchMock.mock.calls.filter(([request]) => requestPath(request) === '/api/jobs')
+    expect(jobs).toHaveLength(1)
+    expect(JSON.parse(String(jobs[0]?.[1]?.body))).toEqual({ html, model: 'gemini-3.7-flash' })
+    expect(fetchMock.mock.calls.some(([request]) => /\/(copy|retry)$/.test(requestPath(request)))).toBe(false)
+  })
+
+  it('myasset 미게시 응답은 기존 파일 선택과 입력을 보존하고 작업을 만들지 않는다', async () => {
+    const fetchMock = installBootstrapFetch(() => jsonResponse({ detail: '게시글 본문을 찾을 수 없습니다.' }, 404))
+    render(App)
+    await finishBootstrap()
+    await fireEvent.click(screen.getByRole('radio', { name: '저장된 파일' }))
+    await fireEvent.update(screen.getByRole('combobox', { name: 'HTML 파일 선택' }), '오늘 시장.html')
+    await fireEvent.click(screen.getByRole('button', { name: 'myasset에서 불러오기' }))
+    await screen.findByText('게시글 본문을 찾을 수 없습니다.')
+    expect(screen.getByRole('combobox', { name: 'HTML 파일 선택' })).toHaveValue('오늘 시장.html')
+    await fireEvent.click(screen.getByRole('radio', { name: '클립보드' }))
+    expect(screen.getByRole('textbox', { name: '클립보드 HTML 원문' })).toHaveValue('<article>오늘의 시장</article>')
+    expect(fetchMock.mock.calls.some(([request]) => requestPath(request) === '/api/jobs')).toBe(false)
+  })
+
+  it('myasset 가져오기 중 중복 요청과 입력 변경을 잠그고 언마운트 뒤 자동 실행하지 않는다', async () => {
+    let resolveImport!: (response: Response) => void
+    const fetchMock = installBootstrapFetch(() => new Promise<Response>(resolve => { resolveImport = resolve }))
+    const { unmount } = render(App)
+    await finishBootstrap()
+    await fireEvent.click(screen.getByRole('button', { name: '불러오기 설정' }))
+    const button = screen.getByRole('button', { name: 'myasset에서 불러오기' })
+    await fireEvent.click(button)
+    await fireEvent.click(button)
+    expect(button).toHaveTextContent('myasset에서 불러오는 중…')
+    expect(button).toBeDisabled()
+    expect(screen.queryByLabelText('gubun')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText('날짜')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '불러오기 설정' })).toBeDisabled()
+    expect(screen.getByRole('radio', { name: '저장된 파일' })).toBeDisabled()
+    expect(screen.getByRole('textbox', { name: '클립보드 HTML 원문' })).toBeDisabled()
+    expect(screen.getByRole('combobox', { name: '시작 모델' })).toBeDisabled()
+    unmount()
+    resolveImport(jsonResponse({ html: '<p>late</p>' }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(fetchMock.mock.calls.filter(([request]) => requestPath(request) === '/api/sources/myasset')).toHaveLength(1)
+    expect(fetchMock.mock.calls.some(([request]) => requestPath(request) === '/api/jobs')).toBe(false)
+  })
+
+  it('myasset 원문은 작업 생성 실패 뒤에도 남아 수동으로 다시 실행할 수 있다', async () => {
+    let submissions = 0
+    const html = '<p>보존할 원문</p>'
+    const fetchMock = installBootstrapFetch(path => {
+      if (path === '/api/sources/myasset') return jsonResponse({ html })
+      if (path === '/api/jobs') return ++submissions === 1 ? jsonResponse({ detail: '작업 시작 실패' }, 500) : jsonResponse(makeJob())
+      return jsonResponse({}, 404)
+    })
+    render(App)
+    await finishBootstrap()
+    await fireEvent.click(screen.getByRole('button', { name: 'myasset에서 불러오기' }))
+    await screen.findByText('작업 시작 실패')
+    expect(screen.getByRole('textbox', { name: '클립보드 HTML 원문' })).toHaveValue(html)
+    await fireEvent.click(screen.getByRole('button', { name: '변환 및 1분 압축' }))
+    await screen.findByText('작업을 준비하는 중')
+    expect(fetchMock.mock.calls.filter(([request]) => requestPath(request) === '/api/jobs')).toHaveLength(2)
+  })
+
+  it.each(['', '-1', '1.5'])('myasset 잘못된 gubun %s는 요청을 막고 이유를 표시한다', async value => {
+    const fetchMock = installBootstrapFetch(() => jsonResponse({}, 404))
+    render(App)
+    await finishBootstrap()
+    await fireEvent.click(screen.getByRole('button', { name: '불러오기 설정' }))
+    await fireEvent.update(screen.getByLabelText('gubun'), value)
+    expect(screen.getByRole('button', { name: 'myasset에서 불러오기' })).toBeDisabled()
+    expect(screen.getByText('gubun은 0 이상의 정수로 입력하세요.')).toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([request]) => requestPath(request) === '/api/sources/myasset')).toBe(false)
+  })
+
+  it('myasset 빈 날짜는 가져오기를 막고 오류를 알린다', async () => {
+    const fetchMock = installBootstrapFetch(() => jsonResponse({}, 404))
+    render(App)
+    await finishBootstrap()
+    await fireEvent.click(screen.getByRole('button', { name: '불러오기 설정' }))
+    await fireEvent.update(screen.getByLabelText('날짜'), '')
+    expect(screen.getByRole('button', { name: 'myasset에서 불러오기' })).toBeDisabled()
+    expect(screen.getByText('날짜를 YYYY-MM-DD 형식의 유효한 날짜로 입력하세요.')).toBeInTheDocument()
+    expect(fetchMock.mock.calls.some(([request]) => requestPath(request) === '/api/sources/myasset')).toBe(false)
+  })
+
+  it('myasset 조회 오류가 기존 완료 결과를 유지한다', async () => {
+    sessionStorage.setItem('market-compressor.job-id', 'job-1')
+    const fetchMock = installBootstrapFetch(path => path === '/api/jobs/job-1'
+      ? jsonResponse(makeJob({ state: 'completed', serialized: '기존 원문', compressed: '기존 대본' }))
+      : jsonResponse({ detail: '본문 없음' }, 404))
+    render(App)
+    const button = await screen.findByRole('button', { name: 'myasset에서 불러오기' })
+    await waitFor(() => expect(button).toBeEnabled())
+    await fireEvent.click(button)
+    await screen.findByText('본문 없음')
+    expect(screen.getByRole('textbox', { name: '압축 결과' })).toHaveValue('기존 대본')
+    expect(fetchMock.mock.calls.some(([request]) => requestPath(request) === '/api/jobs')).toBe(false)
   })
 
   it('초과 대본을 복원하고 명시적 재생성에서만 요청한다', async () => {
@@ -284,9 +571,10 @@ describe('App', () => {
     expect(sessionStorage.getItem('market-compressor.job-id')).toBe('job-1')
   })
 
-  it('409 응답의 작업 ID를 보존하고 이미 진행 중인 작업을 복원한다', async () => {
+  it.each(['변환 및 1분 압축', 'myasset에서 불러오기'])('%s: 409 응답의 작업 ID를 보존하고 이미 진행 중인 작업을 복원한다', async buttonName => {
     const active = makeJob({ id: 'server-active', state: 'requesting', attempt: 1, key_number: 3 })
     installBootstrapFetch((path) => {
+      if (path === '/api/sources/myasset') return jsonResponse({ html: '<p>가져온 원문</p>' })
       if (path === '/api/jobs') return jsonResponse({ detail: '이미 실행 중인 작업이 있습니다.', job_id: 'server-active' }, 409)
       if (path === '/api/jobs/server-active') return jsonResponse(active)
       return jsonResponse({ detail: 'unexpected' }, 500)
@@ -294,7 +582,7 @@ describe('App', () => {
     render(App)
     await finishBootstrap()
 
-    await fireEvent.click(screen.getByRole('button', { name: '변환 및 1분 압축' }))
+    await fireEvent.click(screen.getByRole('button', { name: buttonName }))
 
     expect(await screen.findByText('Gemini 응답을 기다리는 중')).toBeInTheDocument()
     expect(screen.getByRole('alert')).toHaveTextContent('이미 진행 중인 작업을 이어서 표시합니다.')
@@ -361,7 +649,7 @@ describe('App', () => {
       expect(screen.getByText('검증 실패 대본')).toBeInTheDocument()
       expect(screen.queryByText('최종 5줄 영상 대본')).not.toBeInTheDocument()
     } else {
-      expect(screen.getByRole('status')).toHaveTextContent('영상 원고가 완성되었습니다')
+      expect(screen.getByText('영상 원고가 완성되었습니다')).toBeInTheDocument()
     }
     await screen.findByText('압축 결과를 클립보드에 복사했습니다.')
     await fireEvent.click(screen.getByRole('button', { name: '압축 결과 다운로드' }))
