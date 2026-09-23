@@ -11,6 +11,20 @@ def test_plain_narration_preserves_lines_and_counts_all_text(compressed, seriali
     assert not result.warnings
 
 
+@pytest.mark.parametrize('forward_sentence', [
+    '다음 장에서는 국제유가와 외국인 수급의 변화를 확인해야겠습니다.',
+    '다음 거래일의 핵심 관전 포인트는 국제유가 흐름입니다.',
+    '향후 외국인 수급을 주목해야 합니다.',
+])
+def test_forward_looking_closing_language_is_rejected(compressed, serialized, forward_sentence):
+    neutral = '코스닥의 상대적 강세와 코스피의 제한된 흐름이 시장별 차별화를 보여준 하루였습니다.'
+    lines = compressed.splitlines()
+    lines[4] = lines[4].replace(neutral, forward_sentence)
+
+    with pytest.raises(ValidationError) as caught:
+        validate_compressed('\n'.join(lines), serialized)
+
+    assert any('미래 전망이나 관전·확인 권고' in issue for issue in caught.value.issues)
 def test_collects_both_markets_rates_direction_and_shape(compressed, serialized):
     bad = compressed.replace('7051.61', '7000.00').replace('835.97', '800.00')
     bad = bad.replace('0.67% 오른', '0.68% 내린')

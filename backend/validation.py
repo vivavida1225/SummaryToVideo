@@ -20,6 +20,10 @@ RATE_UNIT = re.compile(r'^\s*(?:%|퍼센트)')
 SENTENCE_END = re.compile(r'(?<!\d)\.|\.(?!\d)')
 UP = re.compile(r'상승|급등|폭등|반등|오른|올랐|올라|오르|오름|강세')
 DOWN = re.compile(r'하락|급락|폭락|내린|내렸|내려|내리|내림|약세|떨어|떨었')
+FORWARD_LOOKING_CLOSE = re.compile(
+    r'다음\s*(?:장|거래일)|향후|앞으로|이후\s*시장|관전\s*포인트|'
+    r'(?:확인|주목)(?:해야|해\s*볼|할\s*(?:필요|변수|대상|부분|지점))'
+)
 
 
 def count_characters(text: str) -> int:
@@ -160,6 +164,8 @@ def validate_compressed(response: str, serialized: str) -> ValidatedText:
         issues.append('첫 줄 시작 인사와 마지막 줄 종료 인사를 본문과 같은 줄에 표시하세요.')
     if body.count(INTRO) != 1 or body.count(OUTRO) != 1:
         issues.append('시작·종료 인사는 지정된 위치에 한 번씩만 허용됩니다.')
+    if FORWARD_LOOKING_CLOSE.search(lines[-1].replace(OUTRO, '')):
+        issues.append('장면 5: 미래 전망이나 관전·확인 권고 대신 오늘 시장의 중립적인 종합 마감 요약을 작성하세요.')
     for i, line in enumerate(lines, 1):
         # Strip only fixed greetings; never count decimal dots as sentences.
         content = line.replace(INTRO, '').replace(OUTRO, '').strip()

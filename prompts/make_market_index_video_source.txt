@@ -1,0 +1,14 @@
+Motion graphic animation of a financial stock market dashboard based on the reference image. The central text displays:
+- Title: "KOSDAQ" in bold white text
+- Main value: "836.27" in large white numbers
+- Change indicator: "+9.15 (+1.11%)"
+
+Text color rule: Display the change indicator text in vivid red for positive/gains (+), or in blue for negative/losses (-).
+
+Constraints and display rules:
+- Camera & Framing: Completely static, locked-off shot with strictly no camera movement, no panning, no tilting, no zoom, and no mid-video close-ups. The overall framing and composition must remain completely constant throughout.
+- Scale & Text Stability: Font sizes, text scale, and UI elements must not enlarge, expand, or scale up at any point. All numbers and text must remain completely fixed and static throughout the entire video, with no intermediate number changes, counting up, or counting down.
+- First & Last Frame Consistency (Seamless Loop): The first frame and the last frame of the video must be completely identical. The font size, text positioning, background elements, and the appearance of the bottom candlestick chart in the final frame must perfectly match the very first frame.
+- Audio: Completely silent video with no sound, no audio, and no background music.
+
+Futuristic dark navy HUD background with glowing digital grid lines, subtle data flickers, and animated candlestick charts gently pulsating at the bottom. Clean, professional financial broadcast style.
