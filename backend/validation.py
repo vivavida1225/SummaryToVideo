@@ -165,7 +165,7 @@ def validate_compressed(response: str, serialized: str) -> ValidatedText:
     if body.count(INTRO) != 1 or body.count(OUTRO) != 1:
         issues.append('시작·종료 인사는 지정된 위치에 한 번씩만 허용됩니다.')
     if FORWARD_LOOKING_CLOSE.search(lines[-1].replace(OUTRO, '')):
-        issues.append('장면 5: 미래 전망이나 관전·확인 권고 대신 오늘 시장의 중립적인 종합 마감 요약을 작성하세요.')
+        issues.append('장면 5: 미래 전망이나 관전·확인 권고를 쓰지 말고, 원문의 미사용 보완 사실을 작성하세요.')
     for i, line in enumerate(lines, 1):
         # Strip only fixed greetings; never count decimal dots as sentences.
         content = line.replace(INTRO, '').replace(OUTRO, '').strip()

@@ -17,7 +17,7 @@ def test_plain_narration_preserves_lines_and_counts_all_text(compressed, seriali
     '향후 외국인 수급을 주목해야 합니다.',
 ])
 def test_forward_looking_closing_language_is_rejected(compressed, serialized, forward_sentence):
-    neutral = '코스닥의 상대적 강세와 코스피의 제한된 흐름이 시장별 차별화를 보여준 하루였습니다.'
+    neutral = '한국은행은 명목성장률과 레버리지 리스크를 지적하며 추가 금리 인상 가능성을 언급했습니다.'
     lines = compressed.splitlines()
     lines[4] = lines[4].replace(neutral, forward_sentence)
 
