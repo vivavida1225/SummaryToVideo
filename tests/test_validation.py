@@ -25,6 +25,28 @@ def test_forward_looking_closing_language_is_rejected(compressed, serialized, fo
         validate_compressed('\n'.join(lines), serialized)
 
     assert any('미래 전망이나 관전·확인 권고' in issue for issue in caught.value.issues)
+
+
+@pytest.mark.parametrize('word', ['치솟다', '치솟았다', '치솟으며', '치솟는'])
+def test_chisotda_and_conjugations_are_rejected(compressed, serialized, word):
+    text = compressed.replace('명목성장률과', f'{word} 명목성장률과', 1)
+    # Keep the fixture inside the character range while changing the target wording.
+    lines = text.splitlines()
+    deficit = max(0, 490 - sum(map(len, lines)))
+    lines[4] = lines[4].replace(' 오늘의 AI 시황이었습니다.', '가' * deficit + ' 오늘의 AI 시황이었습니다.')
+    text = '\n'.join(lines)
+
+    with pytest.raises(ValidationError) as caught:
+        validate_compressed(text, serialized)
+
+    assert any('치솟다' in issue for issue in caught.value.issues)
+
+
+def test_similar_non_banned_rise_expression_is_accepted(compressed, serialized):
+    text = compressed.replace('명목성장률과', '급등과 명목성장률과', 1)
+    assert validate_compressed(text, serialized).text == text
+
+
 def test_collects_both_markets_rates_direction_and_shape(compressed, serialized):
     bad = compressed.replace('7051.61', '7000.00').replace('835.97', '800.00')
     bad = bad.replace('0.67% 오른', '0.68% 내린')

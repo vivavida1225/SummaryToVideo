@@ -2,7 +2,20 @@ import asyncio
 
 import pytest
 
-from backend.compression import Compressor, CompressionError, ProviderError
+from backend.compression import Compressor, CompressionError, ProviderError, _repair_feedback
+from backend.validation import ValidationError
+
+
+def test_chisotda_ban_is_in_generation_prompt_and_repair_feedback(tmp_path):
+    prompt = tmp_path / 'prompt.txt'
+    prompt.write_text('Instructions', encoding='utf-8')
+    compressor = Compressor(prompt, [])
+
+    assert '치솟다' in compressor.prompt()
+    feedback = _repair_feedback(ValidationError('대본 전체에서 금지 표현 “치솟다”와 그 활용형을 사용하지 마세요.'),
+                                '치솟았다')
+    assert '치솟다' in feedback
+    assert '활용형' in feedback
 
 
 class Transport:

@@ -18,6 +18,7 @@ NUMBER_TOKEN = re.compile(rf'(?<![\d.,+\-−])({NUMBER})(?!\d|[.,]\d)')
 RATE_UNIT = re.compile(r'^\s*(?:%|퍼센트)')
 # A dot between two digits belongs to a decimal, not a sentence boundary.
 SENTENCE_END = re.compile(r'(?<!\d)\.|\.(?!\d)')
+PROHIBITED_EXPRESSION = re.compile(r'치솟[가-힣]*')
 UP = re.compile(r'상승|급등|폭등|반등|오른|올랐|올라|오르|오름|강세')
 DOWN = re.compile(r'하락|급락|폭락|내린|내렸|내려|내리|내림|약세|떨어|떨었')
 FORWARD_LOOKING_CLOSE = re.compile(
@@ -164,6 +165,8 @@ def validate_compressed(response: str, serialized: str) -> ValidatedText:
         issues.append('첫 줄 시작 인사와 마지막 줄 종료 인사를 본문과 같은 줄에 표시하세요.')
     if body.count(INTRO) != 1 or body.count(OUTRO) != 1:
         issues.append('시작·종료 인사는 지정된 위치에 한 번씩만 허용됩니다.')
+    if PROHIBITED_EXPRESSION.search(body):
+        issues.append('대본 전체에서 금지 표현 “치솟다”와 그 활용형을 사용하지 마세요.')
     if FORWARD_LOOKING_CLOSE.search(lines[-1].replace(OUTRO, '')):
         issues.append('장면 5: 미래 전망이나 관전·확인 권고를 쓰지 말고, 원문의 미사용 보완 사실을 작성하세요.')
     for i, line in enumerate(lines, 1):
