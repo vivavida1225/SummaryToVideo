@@ -120,6 +120,39 @@ def test_session_catalog_and_job_model_validation(tmp_path):
         assert default.json()['requested_model'] == 'gemini-3.8-flash'
 
 
+def test_transcription_option_defaults_off_is_stored_and_reused_for_retry(tmp_path, tiny_html):
+    from backend.compression import CompressionError
+
+    observed = []
+
+    class FailingCompressor:
+        def __init__(self, transcribe_numbers):
+            observed.append(transcribe_numbers)
+
+        async def run(self, *args, **kwargs):
+            raise CompressionError('test failure')
+
+    with client(tmp_path) as c:
+        headers = auth(c)
+        manager = c.app.state.manager
+        manager.compressor_factory = lambda **options: FailingCompressor(options['transcribe_numbers'])
+
+        default = c.post('/api/jobs', headers=headers, json={'html': tiny_html}).json()
+        assert default['transcribe_numbers'] is False
+        c.portal.call(manager.wait, default['id'])
+
+        enabled = c.post('/api/jobs', headers=headers, json={
+            'html': tiny_html, 'transcribe_numbers': True,
+        }).json()
+        assert enabled['transcribe_numbers'] is True
+        c.portal.call(manager.wait, enabled['id'])
+
+        retry = c.post(f"/api/jobs/{enabled['id']}/retry", headers=headers).json()
+        c.portal.call(manager.wait, retry['id'])
+        assert retry['transcribe_numbers'] is True
+        assert observed == [False, True, True]
+
+
 def test_retry_model_and_original_source_reach_transport(tmp_path, tiny_html, compressed, monkeypatch):
     from backend.gemini import GeminiTransport, ProviderError
     calls = []

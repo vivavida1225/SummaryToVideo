@@ -8,10 +8,12 @@ import type { Job, SessionInfo, SourceFile } from './types'
 
 const JOB_STORAGE_KEY = 'market-compressor.job-id'
 const MODEL_STORAGE_KEY = 'market-compressor.model'
+const TRANSCRIBE_NUMBERS_STORAGE_KEY = 'market-compressor.transcribe-numbers'
 const TERMINAL_STATES = new Set(['completed', 'failed', 'needs_review'])
 
 const session = ref<SessionInfo | null>(null)
 const selectedModel = ref('')
+const transcribeNumbers = ref(false)
 const files = ref<SourceFile[]>([])
 const sourceMode = ref<'clipboard' | 'file'>('clipboard')
 const clipboardText = ref('')
@@ -85,6 +87,10 @@ function writeStored(storage: 'localStorage' | 'sessionStorage', key: string, va
 
 function rememberModel() {
   writeStored('localStorage', MODEL_STORAGE_KEY, selectedModel.value)
+}
+
+function rememberTranscribeNumbers() {
+  writeStored('localStorage', TRANSCRIBE_NUMBERS_STORAGE_KEY, String(transcribeNumbers.value))
 }
 
 function rememberJob(nextJob: Job) {
@@ -208,6 +214,8 @@ onMounted(async () => {
     const savedModel = readStored('localStorage', MODEL_STORAGE_KEY)
     selectedModel.value = session.value.models.some(model => model.id === savedModel) ? savedModel! : session.value.model
     rememberModel()
+    transcribeNumbers.value = readStored('localStorage', TRANSCRIBE_NUMBERS_STORAGE_KEY) === 'true'
+    rememberTranscribeNumbers()
     const [fileResult, sourceResult] = await Promise.allSettled([
       api.files(),
       (async () => {
@@ -273,7 +281,7 @@ async function runJob() {
     const source = sourceMode.value === 'clipboard'
       ? { html: clipboardText.value }
       : { file_path: selectedFile.value }
-    await submitJob(source, selectedModel.value)
+    await submitJob(source, selectedModel.value, transcribeNumbers.value)
   } catch (error) {
     pageError.value = friendlyError(error)
   } finally {
@@ -298,6 +306,7 @@ async function loadMyasset() {
   const baseDate = myassetDate.value
   const gubun = Number(myassetGubun.value)
   const model = selectedModel.value
+  const transcribeNumbersForJob = transcribeNumbers.value
   actionBusy.value = true
   fetchingMyasset.value = true
   sourceError.value = ''
@@ -312,7 +321,7 @@ async function loadMyasset() {
     await nextTick()
     if (disposed) return
     pageError.value = ''
-    await submitJob({ html: source.html }, model)
+    await submitJob({ html: source.html }, model, transcribeNumbersForJob)
   } catch (error) {
     if (!disposed) sourceError.value = friendlyError(error)
   } finally {
@@ -321,9 +330,10 @@ async function loadMyasset() {
   }
 }
 
-async function submitJob(source: { html: string } | { file_path: string }, model: string): Promise<void> {
+async function submitJob(source: { html: string } | { file_path: string }, model: string,
+                         transcribeNumbersForJob: boolean): Promise<void> {
   try {
-    const created = await api.createJob({ ...source, model })
+    const created = await api.createJob({ ...source, model, transcribe_numbers: transcribeNumbersForJob })
     if (disposed) return
     rememberJob(created)
     schedulePoll()
@@ -415,9 +425,12 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
           <small>LOCAL EDITING DESK</small>
         </span>
       </a>
-      <div v-if="session" class="system-status" aria-label="연결 정보">
-        <span class="online-dot" aria-hidden="true" />
-        <span>로컬 연결</span>
+      <div v-if="session" class="system-status" aria-label="변환 설정">
+        <label class="transcribe-toggle" for="transcribe-numbers">
+          <input id="transcribe-numbers" v-model="transcribeNumbers" type="checkbox"
+            :disabled="loading || actionBusy || isRunning" @change="rememberTranscribeNumbers" />
+          <span>수치 한국어로 바로 전사</span>
+        </label>
         <span class="divider" aria-hidden="true" />
         <label for="start-model" class="sr-only">시작 모델</label>
         <select id="start-model" v-model="selectedModel" class="model-select"
@@ -551,8 +564,8 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
           </div>
           <div v-if="job?.state === 'needs_review'" class="failure-card review-card" role="alert">
             <p v-if="manuallyEdited">아래 안내는 생성 당시 기록입니다. 수정한 대본은 자동 재검증하지 않습니다.</p>
-            <strong>생성된 대본의 분량을 확인하세요</strong>
-            <p>자동 보정을 멈췄습니다. 대본을 확인한 뒤 필요한 경우 재생성을 눌러 주세요.</p>
+            <strong>생성된 대본을 확인하세요</strong>
+            <p>자동 보정이 멈췄습니다. 표시된 사유를 확인하고 필요한 부분을 직접 수정하세요.</p>
             <ul>
               <li v-for="(issue, index) in job.validation_issues ?? []" :key="index">{{ issue }}</li>
             </ul>
@@ -594,7 +607,7 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
           />
           <ResultPanel
             v-if="job.compressed !== null"
-            :title="manuallyEdited ? '수정한 영상 대본' : job.state === 'needs_review' ? '생성된 대본 · 분량 확인 필요' : job.state === 'failed' ? '검증 실패 대본' : '최종 5줄 영상 대본'"
+            :title="manuallyEdited ? '수정한 영상 대본' : job.state === 'needs_review' ? '생성된 대본 · 검토 필요' : job.state === 'failed' ? '검증 실패 대본' : '최종 5줄 영상 대본'"
             eyebrow="COMPRESSED"
             :value="compressedDraft"
             :body-char-count="manuallyEdited ? draftCharCount : job.body_char_count ?? undefined"

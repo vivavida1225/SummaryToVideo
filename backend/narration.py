@@ -19,12 +19,17 @@ def decode_response(raw: str) -> tuple[str, list[str]]:
     return '\n'.join(scenes), issues
 
 
-def validate_response(raw: str, serialized: str):
+def validate_response(raw: str, serialized: str, *, transcribe_numbers: bool = False):
     text, issues = decode_response(raw)
+    requires_review = False
+    validated_draft = text
     try:
-        result = validate_compressed(text, serialized)
+        result = validate_compressed(text, serialized, transcribe_numbers=transcribe_numbers)
     except ValidationError as exc:
         issues.extend(exc.issues)
+        requires_review = exc.requires_review
+        validated_draft = (exc.text or text) if transcribe_numbers else text
     if issues:
-        raise ValidationError(issues, body_char_count=count_characters(text))
+        raise ValidationError(issues, body_char_count=count_characters(validated_draft),
+                              requires_review=requires_review, text=validated_draft)
     return result

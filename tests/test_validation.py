@@ -1,6 +1,7 @@
 import pytest
 
-from backend.validation import ValidationError, validate_compressed
+from backend.validation import ValidationError, _correct_transcribed_closes, validate_compressed
+from backend.transcribe_numbers import number_to_korean
 
 
 def test_plain_narration_preserves_lines_and_counts_all_text(compressed, serialized):
@@ -199,3 +200,139 @@ def test_short_sparse_source_is_not_silently_accepted(compressed, serialized):
     lines[1:4] = ['자료에서 확인되지 않습니다.'] * 3
     with pytest.raises(ValidationError, match='490'):
         validate_compressed('\n'.join(lines), serialized)
+
+
+@pytest.mark.parametrize('wrong_close', ['7000.00', number_to_korean('7000.00')])
+def test_transcription_mode_repairs_only_wrong_closes_and_counts_final_text(compressed, serialized, wrong_close):
+    wrong = compressed.replace('7051.61', wrong_close)
+
+    try:
+        result = validate_compressed(wrong, serialized, transcribe_numbers=True)
+    except Exception as exc:
+        pytest.fail(f'transcription mode should correct a uniquely located close: {exc}')
+
+    assert number_to_korean('7051.61') in result.text
+    assert number_to_korean('7000.00') not in result.text
+    assert result.body_char_count == len(result.text.replace('\n', ''))
+    assert 490 <= result.body_char_count <= 550
+
+
+def test_transcription_mode_keeps_market_close_mapping_and_uses_final_not_intraday_value(compressed, serialized):
+    swapped = compressed.replace('7051.61', 'TEMP').replace('835.97', '7051.61').replace('TEMP', '835.97')
+    swapped = swapped.replace('7051.61을 기록하며', '장중 900을 기록한 뒤 7051.61을 기록하며')
+
+    result = validate_compressed(swapped, serialized, transcribe_numbers=True)
+
+    assert number_to_korean('7051.61') in result.text
+    assert number_to_korean('835.97') in result.text
+    assert number_to_korean('900') in result.text
+    assert 'TEMP' not in result.text
+
+
+def test_transcription_mode_requires_review_when_close_has_no_unique_close_marker(compressed, serialized):
+    ambiguous = compressed.replace(
+        '7051.61로 보합 마감했고,', '7051.61로 보합하며 999선까지 회복했고,'
+    )
+
+    with pytest.raises(ValidationError) as caught:
+        validate_compressed(ambiguous, serialized, transcribe_numbers=True)
+
+    assert caught.value.requires_review
+
+
+def test_transcription_mode_accepts_a_unique_exact_close_without_close_marker(compressed, serialized):
+    exact_close = compressed.replace('7051.61로 보합 마감했고,', '7051.61로 보합했고,')
+
+    result = validate_compressed(exact_close, serialized, transcribe_numbers=True)
+
+    assert number_to_korean('7051.61') in result.text
+
+
+def test_transcription_mode_requires_review_when_an_amount_follows_intraday_index(compressed, serialized):
+    ambiguous = compressed.replace(
+        '7051.61로 보합 마감했고,',
+        '장중 7000선을 회복했고 프로그램 순매수 3200억원으로 마감했습니다,',
+    )
+
+    with pytest.raises(ValidationError) as caught:
+        validate_compressed(ambiguous, serialized, transcribe_numbers=True)
+
+    assert caught.value.requires_review
+    assert '종가와 다른 수치의 경계' in caught.value.issues[0]
+
+
+def test_transcription_mode_does_not_replace_a_later_record_with_the_close(compressed, serialized):
+    later_record = compressed.replace(
+        '7051.61로 보합 마감했고,', '7000으로 보합 마감했고 장중 고점 7200을 기록했습니다,'
+    )
+
+    corrected = _correct_transcribed_closes(later_record, serialized)
+
+    assert '7200' in corrected
+    assert '7,051.61' in corrected
+
+
+def test_transcription_mode_requires_review_when_close_is_not_linked_to_close_marker(compressed, serialized):
+    ambiguous = compressed.replace(
+        '7051.61로 보합 마감했고,',
+        '7000으로 0.03% 상승했고 장중 고점 7200을 기록한 뒤 마감했습니다,',
+    )
+
+    with pytest.raises(ValidationError) as caught:
+        validate_compressed(ambiguous, serialized, transcribe_numbers=True)
+
+    assert caught.value.requires_review
+    assert '최종 종가 위치' in caught.value.issues[0]
+
+
+def test_transcription_mode_does_not_replace_preserved_product_digits_with_close(compressed, serialized):
+    with_product = compressed.replace(
+        '7051.61로 보합 마감했고,', '7051.61로 보합 TIGER S&P500이 강세로 마감했고,'
+    )
+
+    corrected = _correct_transcribed_closes(with_product, serialized)
+
+    assert 'TIGER S&P500' in corrected
+    assert '7,051.61' in corrected
+
+
+def test_transcription_mode_rejects_an_extra_conflicting_rate(compressed, serialized):
+    conflicting = compressed.replace(
+        '0.67% 오른 835.97을 기록하며',
+        '0.67% 오른 835.97을 기록하며 0.50%의 추가 변동도 나타났습니다',
+    )
+
+    with pytest.raises(ValidationError):
+        validate_compressed(conflicting, serialized, transcribe_numbers=True)
+
+
+@pytest.mark.parametrize('wrong', [
+    '0.66% 오른',
+    '0.67% 내린',
+])
+def test_transcription_mode_still_validates_rate_and_direction(compressed, serialized, wrong):
+    bad = compressed.replace('0.67% 오른', wrong)
+    try:
+        validate_compressed(bad, serialized, transcribe_numbers=True)
+    except TypeError as exc:
+        pytest.fail(f'validation mode parameter is missing: {exc}')
+    except ValidationError:
+        return
+    pytest.fail('transcription mode accepted an incorrect rate or direction')
+
+
+def test_transcription_mode_does_not_accept_wrong_rate_as_zero_change(compressed, serialized):
+    bad = compressed.replace('7051.61로 보합', '7051.61로 0.01% 오른 보합')
+    try:
+        validate_compressed(bad, serialized, transcribe_numbers=True)
+    except TypeError as exc:
+        pytest.fail(f'validation mode parameter is missing: {exc}')
+    except ValidationError:
+        return
+    pytest.fail('transcription mode accepted a nonzero rate for the zero-change source')
+
+
+def test_transcription_mode_accepts_spoken_zero_rate_with_neutral_direction(compressed, serialized):
+    explicit_zero = compressed.replace('7051.61로 보합 마감', '7051.61로 0.00% 보합 마감')
+    result = validate_compressed(explicit_zero, serialized, transcribe_numbers=True)
+    assert f"{number_to_korean('0.00')}%" in result.text

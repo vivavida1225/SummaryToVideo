@@ -71,6 +71,48 @@ async function finishBootstrap() {
 }
 
 describe('App', () => {
+  it('수치 전사 옵션은 기본으로 꺼져 있고 저장한 선택을 일반 변환 요청에 보낸다', async () => {
+    const fetchMock = installBootstrapFetch(path => path === '/api/jobs'
+      ? jsonResponse(makeJob(), 202) : jsonResponse({}, 404))
+    render(App)
+    await finishBootstrap()
+
+    const checkbox = screen.getByRole('checkbox', { name: '수치 한국어로 바로 전사' })
+    expect(checkbox).not.toBeChecked()
+    expect(localStorage.getItem('market-compressor.transcribe-numbers')).toBe('false')
+    await fireEvent.click(checkbox)
+    expect(localStorage.getItem('market-compressor.transcribe-numbers')).toBe('true')
+    await fireEvent.click(screen.getByRole('button', { name: '변환 및 1분 압축' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([request]) => requestPath(request) === '/api/jobs')).toBe(true))
+    const call = fetchMock.mock.calls.find(([request]) => requestPath(request) === '/api/jobs')
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      html: '<article>오늘의 시장</article>', model: 'gemini-3.8-flash', transcribe_numbers: true,
+    })
+  })
+
+  it('저장된 수치 전사 선택을 다시 불러온다', async () => {
+    localStorage.setItem('market-compressor.transcribe-numbers', 'true')
+    installBootstrapFetch(() => jsonResponse({}, 404))
+    render(App)
+    await finishBootstrap()
+    expect(screen.getByRole('checkbox', { name: '수치 한국어로 바로 전사' })).toBeChecked()
+  })
+
+  it('myasset 자동 변환도 현재 수치 전사 옵션을 전달한다', async () => {
+    const fetchMock = installBootstrapFetch(path => {
+      if (path === '/api/sources/myasset') return jsonResponse({ html: '<p>원문</p>' })
+      if (path === '/api/jobs') return jsonResponse(makeJob(), 202)
+      return jsonResponse({}, 404)
+    })
+    render(App)
+    await finishBootstrap()
+    await fireEvent.click(screen.getByRole('checkbox', { name: '수치 한국어로 바로 전사' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'myasset에서 불러오기' }))
+    await waitFor(() => expect(fetchMock.mock.calls.some(([request]) => requestPath(request) === '/api/jobs')).toBe(true))
+    const call = fetchMock.mock.calls.find(([request]) => requestPath(request) === '/api/jobs')
+    expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({ transcribe_numbers: true })
+  })
+
   it('저장 중 원래 내용으로 되돌려도 미완료 요청이 있으면 이탈 경고를 유지한다', async () => {
     sessionStorage.setItem('market-compressor.job-id', 'job-1')
     const original = makeJob({ state: 'completed', compressed: '원본' })
@@ -254,7 +296,7 @@ describe('App', () => {
     const html = '<article>가져온 원문</article>'
     const fetchMock = installBootstrapFetch((path) => {
       if (path === '/api/sources/myasset') return jsonResponse({ html, source_url: 'https://www.myasset.com', base_date: '2026-09-17', gubun: 1 })
-      if (path === '/api/jobs') return jsonResponse(makeJob({ state: 'needs_review', serialized: '정돈된 원문', compressed: '검토 대본', validation_issues: ['분량 확인'] }))
+      if (path === '/api/jobs') return jsonResponse(makeJob({ state: 'needs_review', serialized: '정돈된 원문', compressed: '검토 대본', validation_issues: ['숫자 경계를 확인해야 합니다.'] }))
       return jsonResponse({}, 404)
     })
     render(App)
@@ -267,13 +309,14 @@ describe('App', () => {
     await fireEvent.update(screen.getByLabelText('gubun'), '1')
     await fireEvent.click(screen.getByRole('button', { name: 'myasset에서 불러오기' }))
     expect(await screen.findByRole('textbox', { name: '클립보드 HTML 원문' })).toHaveValue(html)
-    await screen.findByText('생성된 대본의 분량을 확인하세요')
+    await screen.findByText('생성된 대본을 확인하세요')
+    expect(screen.getByText('숫자 경계를 확인해야 합니다.')).toBeInTheDocument()
     const imports = fetchMock.mock.calls.filter(([request]) => requestPath(request) === '/api/sources/myasset')
     expect(JSON.parse(String(imports[0]?.[1]?.body))).toEqual({ base_date: '2026-09-17', gubun: 1 })
     expect(new Headers(imports[0]?.[1]?.headers).get('X-App-Token')).toBe('session-token')
     const jobs = fetchMock.mock.calls.filter(([request]) => requestPath(request) === '/api/jobs')
     expect(jobs).toHaveLength(1)
-    expect(JSON.parse(String(jobs[0]?.[1]?.body))).toEqual({ html, model: 'gemini-3.7-flash' })
+    expect(JSON.parse(String(jobs[0]?.[1]?.body))).toEqual({ html, model: 'gemini-3.7-flash', transcribe_numbers: false })
     expect(fetchMock.mock.calls.some(([request]) => /\/(copy|retry)$/.test(requestPath(request)))).toBe(false)
   })
 
@@ -413,7 +456,9 @@ describe('App', () => {
     await fireEvent.click(screen.getByRole('button', { name: '변환 및 1분 압축' }))
     await waitFor(() => expect(select).toBeDisabled())
     const call = fetchMock.mock.calls.find(([request]) => requestPath(request) === '/api/jobs')
-    expect(JSON.parse(String(call?.[1]?.body))).toEqual({ html: '<article>오늘의 시장</article>', model: 'gemini-3.7-flash' })
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      html: '<article>오늘의 시장</article>', model: 'gemini-3.7-flash', transcribe_numbers: false,
+    })
   })
 
   it.each([
@@ -528,7 +573,9 @@ describe('App', () => {
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(([request]) => requestPath(request) === '/api/jobs')
       expect(call).toBeDefined()
-      expect(JSON.parse(String(call?.[1]?.body))).toEqual({ file_path: '오늘 시장.html', model: 'gemini-3.8-flash' })
+      expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+        file_path: '오늘 시장.html', model: 'gemini-3.8-flash', transcribe_numbers: false,
+      })
       expect(new Headers(call?.[1]?.headers).get('X-App-Token')).toBe('session-token')
     })
   })

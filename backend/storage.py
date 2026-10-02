@@ -101,6 +101,7 @@ class ResultStore:
         job.setdefault('attempted_models', [])
         job.setdefault('validation_issues', [])
         job.setdefault('excess_char_count', 0)
+        job.setdefault('transcribe_numbers', False)
         job.setdefault('revision', 0)
         job.setdefault('edited_at', None)
         for stage in ('serialized', 'compressed'):

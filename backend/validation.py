@@ -7,6 +7,9 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal
 
+from .transcribe_numbers import (NumberTranscriptionError, is_preserved_numeric_label, number_to_korean,
+                                 transcribe_numeric_tokens)
+
 
 INTRO = '오늘의 AI 시황입니다.'
 OUTRO = '오늘의 AI 시황이었습니다.'
@@ -32,10 +35,13 @@ def count_characters(text: str) -> int:
 
 
 class ValidationError(ValueError):
-    def __init__(self, issues: str | list[str], *, body_char_count: int | None = None):
+    def __init__(self, issues: str | list[str], *, body_char_count: int | None = None,
+                 requires_review: bool = False, text: str | None = None):
         self.issues = [issues] if isinstance(issues, str) else issues
         self.body_char_count = body_char_count
         self.excess_char_count = max(0, body_char_count - MAX_CHARS) if body_char_count is not None else 0
+        self.requires_review = requires_review
+        self.text = text
         super().__init__('\n'.join(self.issues))
 
 
@@ -154,8 +160,164 @@ def _validate_indices(first_line: str, serialized: str) -> list[str]:
     return issues
 
 
-def validate_compressed(response: str, serialized: str) -> ValidatedText:
+_SPOKEN_NUMBER = re.compile(
+    r'(?:마이너스 |플러스 )?[영일이삼사오육칠팔구십백천만억조]+(?: 점 [영일이삼사오육칠팔구십백천억조]+)?'
+)
+_NON_INDEX_MEASURE = re.compile(
+    r'^\s*(?:조원|억원|천원|만원|원|달러|계약|주식|주|명|개|회|건|곳|대|년|월|일|분기|분|초|배)'
+)
+_SPOKEN_NUMBER_SUFFIXES = (
+    '으로', '로', '은', '는', '이', '가', '을', '를', '의', '와', '과', '에', '에서', '까지', '보다',
+    '퍼센트', '포인트', '달러', '원', '년', '월', '일', '주', '분기', '분', '초', '명', '개', '회', '건',
+    '배', '곳', '대', '선',
+)
+
+
+def _market_clauses(first_line: str):
+    names = list(re.finditer('코스피|코스닥', first_line))
+    return [(match[0], first_line[match.end():names[index + 1].start() if index + 1 < len(names) else len(first_line)],
+             match.end()) for index, match in enumerate(names)]
+
+
+def _close_candidates(clause: str):
+    candidates = []
+    for pattern in (NUMBER_TOKEN, _SPOKEN_NUMBER):
+        for match in pattern.finditer(clause):
+            after = clause[match.end():]
+            before = clause[:match.start()]
+            if is_preserved_numeric_label(clause, match.start(), match.end()):
+                continue
+            if pattern is _SPOKEN_NUMBER:
+                if before and (before[-1].isalnum() or '\uac00' <= before[-1] <= '\ud7a3'):
+                    continue
+                if after and ('\uac00' <= after[0] <= '\ud7a3') and not any(
+                        clause.startswith(suffix, match.end()) for suffix in _SPOKEN_NUMBER_SUFFIXES):
+                    continue
+            if pattern is NUMBER_TOKEN and match[1].startswith(('+', '-', '−')):
+                continue
+            if pattern is _SPOKEN_NUMBER and match[0].startswith(('마이너스 ', '플러스 ')):
+                continue
+            if RATE_UNIT.match(after) or after.startswith(('퍼센트', '%')):
+                continue
+            if re.match(r'\s*(?:포인트\s*)?(?:상승|하락|오른|내린)', after):
+                continue
+            # A number directly marked as a rate is not an index level.
+            if before.endswith(('상승률', '하락률')):
+                continue
+            candidates.append(match)
+    return sorted(candidates, key=lambda match: match.start())
+
+
+def _matches_index_value(match: re.Match, close: str) -> bool:
+    if match.re == _SPOKEN_NUMBER:
+        return match[0] == number_to_korean(close.replace(',', ''))
+    return _number(match[0]) == _number(close)
+
+
+def _correct_transcribed_closes(response: str, serialized: str) -> str:
+    first_line = response.replace('\r\n', '\n').split('\n', 1)[0]
+    expected = index_triples(serialized)
+    clauses = _market_clauses(first_line)
+    replacements = []
+    for offset in (0, 3):
+        name, close = expected[offset], expected[offset + 1]
+        market_clauses = [(clause, start) for market, clause, start in clauses if market == name]
+        closes = []
+        for clause, start in market_clauses:
+            endings = list(re.finditer(r'마감', clause)) or list(re.finditer(r'기록', clause))
+            if not endings:
+                candidates = _close_candidates(clause)
+                if not candidates:
+                    continue
+                exact = [match for match in candidates if _matches_index_value(match, close)]
+                if len(candidates) != 1 or len(exact) != 1:
+                    raise NumberTranscriptionError(f'1장면에서 {name} 최종 종가 위치를 특정할 수 없습니다.')
+                closes.append((exact[0], start))
+                continue
+            marker = endings[-1].start()
+            if any(_NON_INDEX_MEASURE.match(clause[match.end():])
+                   for match in NUMBER_TOKEN.finditer(clause[:marker])):
+                raise NumberTranscriptionError(f'1장면에서 {name} 종가와 다른 수치의 경계를 확인할 수 없습니다.')
+            candidates = [match for match in _close_candidates(clause) if match.end() <= marker]
+            if candidates:
+                marker_text = clause[endings[-1].start():endings[-1].end()]
+                link_pattern = (r'\s*(?:(?:을|를|이|가|로|으로)\s*)?'
+                                if marker_text == '기록' else
+                                r'\s*(?:(?:을|를|이|가|로|으로)\s*)?(?:(?:보합|상승|하락|강세|약세)\s*)?')
+                linked = [match for match in candidates
+                          if re.fullmatch(link_pattern, clause[match.end():marker])]
+                exact = [match for match in candidates if _matches_index_value(match, close)]
+                if len(linked) == 1:
+                    closes.append((linked[0], start))
+                elif not linked and len(candidates) == 1 and len(exact) == 1:
+                    closes.append((exact[0], start))
+                else:
+                    raise NumberTranscriptionError(f'1장면에서 {name} 최종 종가 위치를 특정할 수 없습니다.')
+        if len(closes) != 1:
+            raise NumberTranscriptionError(f'1장면에서 {name} 최종 종가 위치를 하나로 특정할 수 없습니다.')
+        match, start = closes[0]
+        raw = match[0]
+        if raw != number_to_korean(close.replace(',', '')):
+            replacements.append((start + match.start(), start + match.end(), close))
+
+    result = response
+    for start, end, close in sorted(replacements, reverse=True):
+        result = result[:start] + close + result[end:]
+    return result
+
+
+def _validate_transcribed_indices(first_line: str, serialized: str) -> list[str]:
+    issues = []
+    expected = index_triples(serialized)
+    clauses = _market_clauses(first_line)
+    for offset in (0, 3):
+        name, close, change = expected[offset:offset + 3]
+        delta, percent = re.fullmatch(rf'({NUMBER})\s*\(({NUMBER})%\)', change).groups()
+        clause_matches = [clause for market, clause, _ in clauses if market == name]
+        close_reading = number_to_korean(close.replace(',', ''))
+        if sum(clause.count(close_reading) for clause in clause_matches) != 1:
+            issues.append(f'1장면: {name} 최종 종가 독음이 입력값 {close}와 일치하지 않습니다.')
+            continue
+        rate_reading = number_to_korean(percent)
+        rate_matches = [clause for clause in clause_matches
+                        if re.search(re.escape(rate_reading) + r'(?:%|퍼센트)', clause)]
+        observed_rates = [match for clause in clause_matches
+                          for match in re.finditer(_SPOKEN_NUMBER.pattern + r'(?:%|퍼센트)', clause)]
+        rate_value = abs(_number(percent))
+        delta_value = _number(delta)
+        direction = 1 if delta_value > 0 else -1 if delta_value < 0 else 0
+        if not rate_matches:
+            has_rate_marker = any('%' in clause or '퍼센트' in clause for clause in clause_matches)
+            close_tails = [clause[clause.find(close_reading) + len(close_reading):]
+                           for clause in clause_matches if close_reading in clause]
+            neutral_close = any('보합' in tail and not _directions(tail) for tail in close_tails)
+            if rate_value == 0 and not has_rate_marker and neutral_close:
+                continue
+            issues.append(f'1장면: {name} 등락률 독음 {percent}%와 방향을 입력값에 맞춰야 합니다.')
+            continue
+        if len(rate_matches) != 1 or len(observed_rates) != 1:
+            issues.append(f'1장면: {name} 등락률이 입력값에 맞게 한 번만 나와야 합니다.')
+            continue
+        clause = rate_matches[0]
+        rate_match = re.search(re.escape(rate_reading) + r'(?:%|퍼센트)', clause)
+        tail = clause[rate_match.end():]
+        predicate = re.split(r',(?!\d)|[.!?](?!\d)|지만|며', tail, maxsplit=1)[0]
+        directions = _directions(predicate)
+        signed_direction = -1 if percent.startswith(('-', '−')) else 1 if percent.startswith('+') else None
+        if (signed_direction is not None and rate_value != 0 and signed_direction != direction
+                or directions and directions != {direction}
+                or rate_value != 0 and (not directions or '보합' in predicate)):
+            issues.append(f'1장면: {name} 등락 방향이 원문과 다르거나 불명확합니다.')
+    return issues
+
+
+def validate_compressed(response: str, serialized: str, *, transcribe_numbers: bool = False) -> ValidatedText:
     index_triples(serialized)  # Invalid source cannot be repaired by rewriting the response.
+    if transcribe_numbers:
+        try:
+            response = transcribe_numeric_tokens(_correct_transcribed_closes(response, serialized))
+        except NumberTranscriptionError as exc:
+            raise ValidationError(str(exc), requires_review=True) from None
     issues = []
     body = response.replace('\r\n', '\n').strip('\n')
     lines = body.split('\n')
@@ -179,7 +341,8 @@ def validate_compressed(response: str, serialized: str) -> ValidatedText:
             issues.append(f'장면 {i}: 인사말을 제외한 본문은 마침표로 끝나는 1~2문장이어야 합니다.')
         if re.search(r'[!?。！？]', content):
             issues.append(f'장면 {i}: 본문 문장은 마침표로 끝내세요.')
-    issues.extend(_validate_indices(lines[0], serialized))
+    issues.extend(_validate_transcribed_indices(lines[0], serialized) if transcribe_numbers
+                  else _validate_indices(lines[0], serialized))
     chars = count_characters(body)
     if chars < MIN_CHARS:
         issues.append(f'전체 대본은 {MIN_CHARS}~{MAX_CHARS}자여야 합니다. 현재 {chars}자로 '
@@ -190,5 +353,5 @@ def validate_compressed(response: str, serialized: str) -> ValidatedText:
                               f'{chars - MAX_CHARS}자 초과합니다. 중복과 세부 정보를 줄이세요 '
                               '(인사말·숫자·공백 포함, 개행 제외).')
     if issues:
-        raise ValidationError(issues, body_char_count=chars)
+        raise ValidationError(issues, body_char_count=chars, text=body)
     return ValidatedText(body, chars, [])

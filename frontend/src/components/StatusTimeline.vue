@@ -14,7 +14,7 @@ const stateLabel: Record<JobState, string> = {
   validating: '결과 형식을 확인하는 중',
   copying_compressed: '압축 결과를 복사하는 중',
   completed: '영상 원고가 완성되었습니다',
-  needs_review: '분량 확인 필요',
+  needs_review: '검토 필요',
   failed: '작업을 완료하지 못했습니다',
 }
 

@@ -757,3 +757,4 @@ A가 B를 유발했다고 명시하지 않았다면
 [입력 데이터]
 
 {{SCENE_MARKET_DATA}}
+{{NUMBER_TRANSCRIPTION_POLICY}}

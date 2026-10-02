@@ -2,8 +2,9 @@ import asyncio
 
 import pytest
 
-from backend.compression import Compressor, CompressionError, ProviderError, _repair_feedback
+from backend.compression import Compressor, CompressionError, ProviderError, ResponseValidationError, _repair_feedback
 from backend.validation import ValidationError
+from backend.transcribe_numbers import number_to_korean
 
 
 def test_chisotda_ban_is_in_generation_prompt_and_repair_feedback(tmp_path):
@@ -16,6 +17,36 @@ def test_chisotda_ban_is_in_generation_prompt_and_repair_feedback(tmp_path):
                                 '치솟았다')
     assert '치솟다' in feedback
     assert '활용형' in feedback
+
+
+@pytest.mark.parametrize('wrong_close', ['7000.00', number_to_korean('7000.00')])
+def test_transcription_mode_adds_prompt_contract_and_corrects_close_without_retry(
+        tmp_path, serialized, compressed, wrong_close):
+    wrong = compressed.replace('7051.61', wrong_close)
+    try:
+        result, transport, _, _, _ = execute(
+            tmp_path, serialized, [wrong], transcribe_numbers=True)
+    except TypeError as exc:
+        pytest.fail(f'compressor transcription mode is missing: {exc}')
+
+    assert len(transport.calls) == 1
+    assert number_to_korean('7051.61') in result.text
+    assert '한국어' in transport.calls[0]['prompt']
+
+
+def test_ambiguous_number_boundary_stops_with_review_instead_of_retry(tmp_path, serialized, compressed):
+    ambiguous = compressed.replace('100달러', '1,23달러')
+    prompt = tmp_path / 'prompt.txt'
+    prompt.write_text('Instructions\n{{SCENE_MARKET_DATA}}', encoding='utf-8')
+    transport = Transport([ambiguous, compressed])
+    compressor = Compressor(prompt, [(1, 'fake')], transport=transport, transcribe_numbers=True)
+
+    with pytest.raises(ResponseValidationError) as caught:
+        asyncio.run(compressor.run(serialized, lambda *args, **kwargs: None, lambda *args: None))
+
+    assert caught.value.requires_review is True
+    assert len(transport.calls) == 1
+    assert caught.value.response == ambiguous
 
 
 class Transport:

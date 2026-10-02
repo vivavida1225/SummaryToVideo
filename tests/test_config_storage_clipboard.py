@@ -79,6 +79,7 @@ def test_legacy_archived_result_loads_without_narration_revalidation(tmp_path):
     job = store.load(job_id)
     assert job['compressed'] == legacy
     assert job['body_char_count'] == 25
+    assert job['transcribe_numbers'] is False
 
 
 def test_multi_digit_attempt_storage_and_legacy_model_recovery(tmp_path):

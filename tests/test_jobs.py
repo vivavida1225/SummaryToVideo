@@ -5,7 +5,9 @@ import pytest
 
 from backend.jobs import JobManager, JobConflict
 from backend.config import Settings
-from backend.validation import validate_compressed
+from backend.validation import ValidationError, validate_compressed
+from backend.compression import ResponseValidationError
+from backend.transcribe_numbers import number_to_korean
 
 
 class Clipboard:
@@ -82,6 +84,49 @@ def test_failure_preserves_serialized_and_retry_uses_snapshot(tmp_path, tiny_htm
         assert second['id'] != first['id'] and second['parent_id'] == first['id']
         assert compressor.sources == [first['serialized'], first['serialized']]
         assert clipboard.writes == []
+    asyncio.run(scenario())
+
+
+def test_ambiguous_transcription_is_saved_as_needs_review_without_losing_draft(tmp_path, tiny_html):
+    async def scenario():
+        draft = '초안 원문'
+        error = ResponseValidationError(ValidationError('숫자 경계를 확인해야 합니다.', requires_review=True), draft)
+        manager, _, _ = setup(tmp_path, error)
+        first = manager.start(html=tiny_html, transcribe_numbers=True)
+        await manager.wait(first['id'])
+        job = manager.get(first['id'])
+
+        assert job['state'] == 'needs_review'
+        assert job['transcribe_numbers'] is True
+        assert job['compressed'] == draft
+        assert job['validation_issues'] == ['숫자 경계를 확인해야 합니다.']
+
+    asyncio.run(scenario())
+
+
+def test_transcribed_job_keeps_model_response_and_corrected_script_separate(tmp_path, serialized, compressed):
+    from backend.compression import Compressor as RealCompressor
+    from tests.test_compression import Transport
+
+    async def scenario():
+        settings = Settings(tmp_path)
+        settings.prompt_path.parent.mkdir(parents=True, exist_ok=True)
+        settings.prompt_path.write_text('instructions', encoding='utf-8')
+        (tmp_path / '.env').write_text('GEMINI_API_KEY_1=fake', encoding='utf-8')
+        raw = compressed.replace('7051.61', '7000.00')
+        manager = JobManager(settings, compressor_factory=lambda **options: RealCompressor(
+            settings.prompt_path, transport=Transport([raw]), **options))
+        first = manager.start(snapshot=serialized, transcribe_numbers=True)
+        await manager.wait(first['id'])
+        job = manager.get(first['id'])
+        folder = tmp_path / job['output_dir']
+
+        assert job['state'] == 'completed', (job.get('error'), job.get('validation_issues'), job.get('compressed'))
+        assert number_to_korean('7051.61') in job['compressed']
+        assert '7000.00' not in job['compressed']
+        assert (folder / 'raw_response_1.txt').read_text(encoding='utf-8') == raw
+        assert (folder / 'compressed.txt').read_text(encoding='utf-8') == job['compressed']
+
     asyncio.run(scenario())
 
 

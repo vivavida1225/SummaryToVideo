@@ -59,13 +59,17 @@ def main():
             page.goto(f'http://127.0.0.1:{server.server_port}', wait_until='networkidle')
             expect(page.get_by_text('551자 · 상한 550자보다 1자 초과')).to_be_visible()
             expect(page.get_by_role('textbox', name='압축 결과')).to_have_value('가' * 551)
-            expect(page.get_by_role('heading', name='분량 확인 필요', exact=True)).to_be_visible()
+            expect(page.get_by_role('heading', name='검토 필요', exact=True)).to_be_visible()
             page.wait_for_timeout(1200)
             assert requests.count('jobs/review') == 1
             assert not any(path.endswith('/retry') for path in requests)
             for width in [320, 390, 1440]:
                 page.set_viewport_size({'width': width, 'height': 1000})
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth'), width
+                toggle = page.get_by_role('checkbox', name='수치 한국어로 바로 전사')
+                expect(toggle).to_be_visible()
+                bounds = toggle.bounding_box()
+                assert bounds is not None and bounds['x'] >= 0 and bounds['x'] + bounds['width'] <= width, width
                 # Trial click verifies visibility and pointer interception without submitting.
                 page.get_by_role('button', name='대본 재생성').click(trial=True)
                 if width in (390, 1440):

@@ -52,6 +52,14 @@ OUTPUT_CONTRACT = '''
 '''
 
 
+TRANSCRIBE_NUMBERS_CONTRACT = '''
+[수치 한국어 전사]
+대본의 일반 숫자 수치는 한국어 수사로 씁니다. 정수는 육천팔백팔십사처럼 읽고, 소수점 아래는 각 자리를 따로 읽습니다. 예를 들어 6884.15는 육천팔백팔십사 점 일오입니다.
+원문의 수치, 부호, 소수 자릿수, 단위, 범위와 대상을 그대로 보존합니다. 2차전지 같은 고정 용어와 숫자가 포함된 상품명·고유명사는 원문 표기를 유지합니다. 숫자나 사실을 새로 만들거나 값을 바꾸지 않습니다.
+등락률도 수치 독음으로 쓰되 원문의 등락 방향을 그대로 유지합니다.
+'''
+
+
 class CompressionError(Exception):
     def __init__(self, message: str, response: str = ''):
         super().__init__(message)
@@ -65,6 +73,7 @@ class ResponseValidationError(CompressionError):
         self.validation_issues = error.issues
         self.body_char_count = error.body_char_count
         self.excess_char_count = error.excess_char_count
+        self.requires_review = error.requires_review
 
 
 def _repair_feedback(error: ValidationError, raw: str) -> str:
@@ -114,17 +123,22 @@ def _repair_feedback(error: ValidationError, raw: str) -> str:
 class Compressor:
     def __init__(self, prompt_path: Path, keys: list[tuple[int, str]], *, model: str = MODEL,
                  transport=None, sleep=asyncio.sleep, clock=time.monotonic,
-                 request_timeout: float = 60, total_timeout: float = 300):
+                 request_timeout: float = 60, total_timeout: float = 300,
+                 transcribe_numbers: bool = False):
         self.prompt_path, self.keys, self.model = prompt_path, keys, model
         self.models = model_candidates(model)
         self.max_attempts = len(self.models) + len(keys)
         self.transport = transport or GeminiTransport()
         self.sleep, self.clock = sleep, clock
         self.request_timeout, self.total_timeout = request_timeout, total_timeout
+        self.transcribe_numbers = transcribe_numbers
 
     def prompt(self) -> str:
         template = self.prompt_path.read_text(encoding='utf-8-sig')
-        return template.replace('{{SCENE_MARKET_DATA}}', '[별도 사용자 메시지의 장면별 시황 데이터]') + OUTPUT_CONTRACT
+        policy = TRANSCRIBE_NUMBERS_CONTRACT if self.transcribe_numbers else ''
+        template = template.replace('{{NUMBER_TRANSCRIPTION_POLICY}}', policy)
+        prompt = template.replace('{{SCENE_MARKET_DATA}}', '[별도 사용자 메시지의 장면별 시황 데이터]') + OUTPUT_CONTRACT
+        return prompt + ('\n' + TRANSCRIBE_NUMBERS_CONTRACT if self.transcribe_numbers else '')
 
     async def run(self, serialized: str, emit, save_invalid, save_raw=None, *,
                   previous_response: str = '', validation_issues: list[str] | None = None) -> ValidatedText:
@@ -134,6 +148,8 @@ class Compressor:
         start, key_index, model_index, repairs = self.clock(), 0, 0, int(bool(previous_response))
         max_attempts = self.max_attempts - repairs
         feedback = _repair_feedback(ValidationError(validation_issues or []), previous_response) if previous_response else ''
+        if feedback and self.transcribe_numbers:
+            feedback += '\n' + TRANSCRIBE_NUMBERS_CONTRACT
         attempted_models = []
         rejected_keys = set()
 
@@ -164,13 +180,15 @@ class Compressor:
                     save_raw(attempt, raw)
                 emit('validating', message='5줄 대본, 문장 수, 분량, 최종 지수와 등락을 검증합니다.')
                 try:
-                    return validate_response(raw, serialized)
+                    return validate_response(raw, serialized, transcribe_numbers=self.transcribe_numbers)
                 except ValidationError as exc:
                     save_invalid(attempt, raw)
-                    if exc.excess_char_count > 0 or repairs >= 1:
-                        raise ResponseValidationError(exc, decode_response(raw)[0]) from None
+                    if exc.requires_review or exc.excess_char_count > 0 or repairs >= 1:
+                        raise ResponseValidationError(exc, exc.text or decode_response(raw)[0]) from None
                     repairs += 1
                     feedback = _repair_feedback(exc, raw)
+                    if self.transcribe_numbers:
+                        feedback += '\n' + TRANSCRIBE_NUMBERS_CONTRACT
                     previous_response = raw
                     emit('validating', message=f'형식 보정 요청을 준비합니다: {exc}')
                     continue

@@ -59,7 +59,7 @@ export const api = {
     return request('/api/clipboard/read', { method: 'POST' })
   },
 
-  createJob(source: ({ html: string } | { file_path: string }) & { model?: string }): Promise<Job> {
+  createJob(source: ({ html: string } | { file_path: string }) & { model?: string; transcribe_numbers: boolean }): Promise<Job> {
     return request('/api/jobs', { method: 'POST', body: JSON.stringify(source) })
   },
 

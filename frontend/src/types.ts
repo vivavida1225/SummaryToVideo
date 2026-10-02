@@ -26,6 +26,7 @@ export interface Job {
   max_attempts: number
   model?: string
   requested_model?: string | null
+  transcribe_numbers?: boolean
   attempted_models?: string[]
   key_number: number | null
   retry_at: string | null

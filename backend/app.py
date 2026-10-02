@@ -35,6 +35,7 @@ class ModelInput(BaseModel):
 class JobInput(ModelInput):
     html: str | None = Field(default=None, min_length=1, max_length=MAX_INPUT_BYTES)
     file_path: str | None = Field(default=None, min_length=1, max_length=1024)
+    transcribe_numbers: bool = Field(default=False, strict=True)
 
     @model_validator(mode='after')
     def exactly_one_source(self):
@@ -176,7 +177,8 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
                     raise ValueError('선택한 파일이 없습니다. 목록을 새로고침하세요.')
             except (ValueError, OSError) as exc:
                 raise HTTPException(422, str(exc)) from None
-        return manager.start(html=data.html, file_path=data.file_path, model=data.model)
+        return manager.start(html=data.html, file_path=data.file_path, model=data.model,
+                             transcribe_numbers=data.transcribe_numbers)
 
     def find_job(job_id):
         try:
