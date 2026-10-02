@@ -304,6 +304,10 @@ def _validate_transcribed_indices(first_line: str, serialized: str) -> list[str]
         predicate = re.split(r',(?!\d)|[.!?](?!\d)|지만|며', tail, maxsplit=1)[0]
         directions = _directions(predicate)
         signed_direction = -1 if percent.startswith(('-', '−')) else 1 if percent.startswith('+') else None
+        spoken_sign = bool(re.search(r'(?:플러스|마이너스)\s*$', clause[:rate_match.start()]))
+        if ((signed_direction is not None or spoken_sign) and rate_value != 0
+                and directions == {direction}):
+            issues.append(f'1장면: {name} 등락 방향을 오른/내린 동사로 밝혔으므로 등락률의 플러스/마이너스 부호는 읽지 않아야 합니다.')
         if (signed_direction is not None and rate_value != 0 and signed_direction != direction
                 or directions and directions != {direction}
                 or rate_value != 0 and (not directions or '보합' in predicate)):
