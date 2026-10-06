@@ -7,6 +7,8 @@ _SMALL_UNITS = ('', '십', '백', '천')
 _LARGE_UNITS = ('', '만', '억', '조')
 _TOKEN = re.compile(r'(?<![0-9])([+\-−]?(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]+)?)')
 _FIXED_TERMS = re.compile(r'(?<![0-9])2차전지')
+_MAGNITUDE_UNITS = ('조', '억', '만', '천', '백', '십')
+_REDUNDANT_ONE = re.compile(r'일(?=(?:천|백|십))')
 _PRODUCT_PREFIX = re.compile(
     r'(?<![A-Za-z0-9])(?:KODEX|TIGER|ACE|RISE|SOL|HANARO|ARIRANG|KOSEF|KBSTAR|SMART|FOCUS|PLUS|'
     r'TIMEFOLIO|KOSPI|KOSDAQ|코스피|코스닥|S&P|NASDAQ|DOW|DJI|NIKKEI)[ \t]*\Z'
@@ -85,8 +87,16 @@ def transcribe_numeric_tokens(text: str) -> str:
         if is_preserved_numeric_label(text, start, end):
             continue
 
+        previous = start
+        while previous > 0 and text[previous - 1].isspace():
+            previous -= 1
+        embedded_magnitude = (
+            previous > 0
+            and text[previous - 1] in _MAGNITUDE_UNITS
+            and any(text.startswith(unit, end) for unit in _MAGNITUDE_UNITS)
+        )
         if start and (text[start - 1].isalnum() or '\uac00' <= text[start - 1] <= '\ud7a3'
-                       or text[start - 1] in '.,'):
+                       or text[start - 1] in '.,') and not embedded_magnitude:
             raise NumberTranscriptionError(f'숫자 앞 경계를 확인할 수 없습니다: {raw}')
         if end < len(text) and text[end] in '.,' and end + 1 < len(text) and text[end + 1].isdigit():
             raise NumberTranscriptionError(f'숫자 뒤 경계를 확인할 수 없습니다: {raw}')
@@ -113,9 +123,11 @@ def transcribe_numeric_tokens(text: str) -> str:
             spoken = number_to_korean(raw.replace(',', ''))
         except ValueError as exc:
             raise NumberTranscriptionError(str(exc)) from None
+        if embedded_magnitude and previous == start:
+            spoken = ' ' + spoken
         replacements.append((start, end, spoken))
 
     result = text
     for start, end, spoken in reversed(replacements):
         result = result[:start] + spoken + result[end:]
-    return result
+    return _REDUNDANT_ONE.sub('', result)
