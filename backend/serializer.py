@@ -31,7 +31,7 @@ def _text(node: Tag) -> str:
     value = re.sub(r'[ \t]*[\r\n]+[ \t]*', ' ', walk(node)).strip()
     if not value:
         raise SerializationError(f'{node.name} 요소의 텍스트가 비어 있습니다.')
-    return value
+    return value.replace('\u2011', '-')
 
 
 def _one(node: Tag, selector: str, location: str) -> Tag:
