@@ -60,6 +60,17 @@ TRANSCRIBE_NUMBERS_CONTRACT = '''
 첫 줄의 코스피·코스닥 등락률은 숫자만 읽고 플러스·마이너스 부호는 읽지 않습니다. 등락 방향은 오른·내린 등 동사로 표현하며, 같은 방향을 나타내는 부호 낭독은 금지합니다.
 '''
 
+PRESERVE_NUMBERS_CONTRACT = '''
+[수치 표기 유지 - 한국어 전사 꺼짐]
+수치는 한글 수사로 바꾸지 말고 입력의 아라비아 숫자 표기와 단위 조합을 유지합니다. 예를 들어 6,941.39, -0.89%, 1,343원대, 1.2조원대는 그대로 씁니다.
+육천구백사십일점삼구, 마이너스 영 점 팔구 퍼센트, 천삼백사십삼원대처럼 숫자를 한글로 옮기지 않습니다. 2차전지와 숫자가 포함된 상품명·고유명사는 입력 표기를 유지합니다.
+숫자 값을 줄이거나 늘리거나 단위를 바꾸지 않습니다.
+'''
+
+
+def _numbers_contract(transcribe_numbers: bool) -> str:
+    return TRANSCRIBE_NUMBERS_CONTRACT if transcribe_numbers else PRESERVE_NUMBERS_CONTRACT
+
 
 class CompressionError(Exception):
     def __init__(self, message: str, response: str = ''):
@@ -136,10 +147,10 @@ class Compressor:
 
     def prompt(self) -> str:
         template = self.prompt_path.read_text(encoding='utf-8-sig')
-        policy = TRANSCRIBE_NUMBERS_CONTRACT if self.transcribe_numbers else ''
+        policy = _numbers_contract(self.transcribe_numbers)
         template = template.replace('{{NUMBER_TRANSCRIPTION_POLICY}}', policy)
         prompt = template.replace('{{SCENE_MARKET_DATA}}', '[별도 사용자 메시지의 장면별 시황 데이터]') + OUTPUT_CONTRACT
-        return prompt + ('\n' + TRANSCRIBE_NUMBERS_CONTRACT if self.transcribe_numbers else '')
+        return prompt + '\n' + policy
 
     async def run(self, serialized: str, emit, save_invalid, save_raw=None, *,
                   previous_response: str = '', validation_issues: list[str] | None = None) -> ValidatedText:
@@ -149,8 +160,8 @@ class Compressor:
         start, key_index, model_index, repairs = self.clock(), 0, 0, int(bool(previous_response))
         max_attempts = self.max_attempts - repairs
         feedback = _repair_feedback(ValidationError(validation_issues or []), previous_response) if previous_response else ''
-        if feedback and self.transcribe_numbers:
-            feedback += '\n' + TRANSCRIBE_NUMBERS_CONTRACT
+        if feedback:
+            feedback += '\n' + _numbers_contract(self.transcribe_numbers)
         attempted_models = []
         rejected_keys = set()
 
@@ -188,8 +199,7 @@ class Compressor:
                         raise ResponseValidationError(exc, exc.text or decode_response(raw)[0]) from None
                     repairs += 1
                     feedback = _repair_feedback(exc, raw)
-                    if self.transcribe_numbers:
-                        feedback += '\n' + TRANSCRIBE_NUMBERS_CONTRACT
+                    feedback += '\n' + _numbers_contract(self.transcribe_numbers)
                     previous_response = raw
                     emit('validating', message=f'형식 보정 요청을 준비합니다: {exc}')
                     continue

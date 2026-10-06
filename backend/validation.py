@@ -28,10 +28,47 @@ FORWARD_LOOKING_CLOSE = re.compile(
     r'다음\s*(?:장|거래일)|향후|앞으로|이후\s*시장|관전\s*포인트|'
     r'(?:확인|주목)(?:해야|해\s*볼|할\s*(?:필요|변수|대상|부분|지점))'
 )
+_SOURCE_NUMERIC_UNITS = (
+    '조원대', '조원', '억원대', '억원', '만원대', '만원', '천원대', '천원', '원대', '원',
+    '달러대', '달러', '퍼센트', '%', '포인트', '년물', '개월', '분기', '선', '년', '월', '일',
+    '주', '분', '초', '명', '개', '회', '건', '배', '곳',
+)
+_SPOKEN_QUANTITY = re.compile(
+    r'(?P<number>(?:마이너스|플러스)?(?:영|일|이|삼|사|오|육|칠|팔|구|십|백|천|만|억|조)+'
+    r'(?:점(?:영|일|이|삼|사|오|육|칠|팔|구)+)?)(?P<unit>'
+    r'조원대|조원|억원대|억원|만원대|만원|천원대|천원|원대|원|달러대|달러|퍼센트|%|포인트|'
+    r'년물|개월|분기|선|년|월|일|주|분|초|명|개|회|건|배|곳)'
+)
 
 
 def count_characters(text: str) -> int:
     return len(text.replace('\r', '').replace('\n', ''))
+
+
+def _numeric_unit_family(unit: str) -> str:
+    if unit in {'조원대', '조원', '억원대', '억원', '만원대', '만원', '천원대', '천원', '원대', '원',
+                '달러대', '달러'}:
+        return 'currency'
+    if unit in {'퍼센트', '%'}:
+        return 'rate'
+    return unit
+
+
+def _has_spoken_quantities_when_disabled(response: str, serialized: str) -> bool:
+    source_families = set()
+    for match in NUMBER_TOKEN.finditer(serialized):
+        if is_preserved_numeric_label(serialized, *match.span(1)):
+            continue
+        after = serialized[match.end():].lstrip(' \t')
+        unit = next((unit for unit in _SOURCE_NUMERIC_UNITS if after.startswith(unit)), None)
+        if unit:
+            source_families.add(_numeric_unit_family(unit))
+    if not source_families:
+        return False
+
+    compact = re.sub(r'\s+', '', response)
+    return any(_numeric_unit_family(match['unit']) in source_families
+               for match in _SPOKEN_QUANTITY.finditer(compact))
 
 
 class ValidationError(ValueError):
@@ -161,7 +198,7 @@ def _validate_indices(first_line: str, serialized: str) -> list[str]:
 
 
 _SPOKEN_NUMBER = re.compile(
-    r'(?:마이너스 |플러스 )?[영일이삼사오육칠팔구십백천만억조]+(?: 점 [영일이삼사오육칠팔구십백천억조]+)?'
+    r'(?:마이너스 |플러스 )?[영일이삼사오육칠팔구십백천만억조]+(?:\s*점\s*[영일이삼사오육칠팔구십백천억조]+)?'
 )
 _NON_INDEX_MEASURE = re.compile(
     r'^\s*(?:조원|억원|천원|만원|원|달러|계약|주식|주|명|개|회|건|곳|대|년|월|일|분기|분|초|배)'
@@ -278,11 +315,16 @@ def _validate_transcribed_indices(first_line: str, serialized: str) -> list[str]
         if sum(clause.count(close_reading) for clause in clause_matches) != 1:
             issues.append(f'1장면: {name} 최종 종가 독음이 입력값 {close}와 일치하지 않습니다.')
             continue
-        rate_reading = number_to_korean(percent)
+        # The narrated rate is unsigned; the direction is checked from its verb below.
+        rate_reading = number_to_korean(percent.lstrip('+-−'))
+        rate_reading_pattern = r'\s*'.join(
+            re.escape(char) for char in rate_reading if not char.isspace()
+        )
+        rate_pattern = rate_reading_pattern + r'\s*(?:%|퍼센트)'
         rate_matches = [clause for clause in clause_matches
-                        if re.search(re.escape(rate_reading) + r'(?:%|퍼센트)', clause)]
+                        if re.search(rate_pattern, clause)]
         observed_rates = [match for clause in clause_matches
-                          for match in re.finditer(_SPOKEN_NUMBER.pattern + r'(?:%|퍼센트)', clause)]
+                          for match in re.finditer(_SPOKEN_NUMBER.pattern + r'\s*(?:%|퍼센트)', clause)]
         rate_value = abs(_number(percent))
         delta_value = _number(delta)
         direction = 1 if delta_value > 0 else -1 if delta_value < 0 else 0
@@ -299,14 +341,13 @@ def _validate_transcribed_indices(first_line: str, serialized: str) -> list[str]
             issues.append(f'1장면: {name} 등락률이 입력값에 맞게 한 번만 나와야 합니다.')
             continue
         clause = rate_matches[0]
-        rate_match = re.search(re.escape(rate_reading) + r'(?:%|퍼센트)', clause)
+        rate_match = re.search(rate_pattern, clause)
         tail = clause[rate_match.end():]
         predicate = re.split(r',(?!\d)|[.!?](?!\d)|지만|며', tail, maxsplit=1)[0]
         directions = _directions(predicate)
         signed_direction = -1 if percent.startswith(('-', '−')) else 1 if percent.startswith('+') else None
         spoken_sign = bool(re.search(r'(?:플러스|마이너스)\s*$', clause[:rate_match.start()]))
-        if ((signed_direction is not None or spoken_sign) and rate_value != 0
-                and directions == {direction}):
+        if spoken_sign and rate_value != 0 and directions == {direction}:
             issues.append(f'1장면: {name} 등락 방향을 오른/내린 동사로 밝혔으므로 등락률의 플러스/마이너스 부호는 읽지 않아야 합니다.')
         if (signed_direction is not None and rate_value != 0 and signed_direction != direction
                 or directions and directions != {direction}
@@ -333,6 +374,8 @@ def validate_compressed(response: str, serialized: str, *, transcribe_numbers: b
         issues.append('시작·종료 인사는 지정된 위치에 한 번씩만 허용됩니다.')
     if PROHIBITED_EXPRESSION.search(body):
         issues.append('대본 전체에서 금지 표현 “치솟다”와 그 활용형을 사용하지 마세요.')
+    if not transcribe_numbers and _has_spoken_quantities_when_disabled(body, serialized):
+        issues.append('수치 한국어 전사 모드가 꺼져 있습니다. 입력의 아라비아 숫자 표기와 단위를 유지하세요.')
     if FORWARD_LOOKING_CLOSE.search(lines[-1].replace(OUTRO, '')):
         issues.append('장면 5: 미래 전망이나 관전·확인 권고를 쓰지 말고, 원문의 미사용 보완 사실을 작성하세요.')
     for i, line in enumerate(lines, 1):
