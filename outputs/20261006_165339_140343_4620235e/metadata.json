@@ -1,0 +1,50 @@
+{
+  "id": "20261006_165339_140343_4620235e",
+  "parent_id": null,
+  "state": "failed",
+  "source": "클립보드 / 직접 입력",
+  "created_at": "2026-10-06T07:53:39.140405+00:00",
+  "elapsed_seconds": 13.3,
+  "attempt": 2,
+  "max_attempts": 7,
+  "key_number": 1,
+  "retry_at": null,
+  "scene_count": 5,
+  "body_char_count": null,
+  "warnings": [],
+  "error": "파일을 읽거나 저장하지 못했습니다. 경로, 쓰기 권한, 디스크 공간을 확인하세요.",
+  "output_dir": "outputs/20261006_165339_140343_4620235e",
+  "events": [
+    {
+      "at": "2026-10-06T07:53:39.140720+00:00",
+      "message": "HTML을 장면별 평문으로 변환합니다."
+    },
+    {
+      "at": "2026-10-06T07:53:39.165362+00:00",
+      "message": "Gemini 3.8 Flash 응답 대기 · 1/7회 · 키 1"
+    },
+    {
+      "at": "2026-10-06T07:53:52.398537+00:00",
+      "message": "Gemini 3.8 Flash: Gemini 서비스 오류입니다 (HTTP 503). → Gemini 3.7 Flash로 전환합니다."
+    },
+    {
+      "at": "2026-10-06T07:53:52.408253+00:00",
+      "message": "Gemini 3.7 Flash 응답 대기 · 2/7회 · 키 1"
+    },
+    {
+      "at": "2026-10-06T07:53:52.416914+00:00",
+      "message": "파일을 읽거나 저장하지 못했습니다. 경로, 쓰기 권한, 디스크 공간을 확인하세요."
+    }
+  ],
+  "model": "gemini-3.7-flash",
+  "requested_model": "gemini-3.8-flash",
+  "attempted_models": [
+    "gemini-3.8-flash",
+    "gemini-3.7-flash"
+  ],
+  "validation_issues": [],
+  "excess_char_count": 0,
+  "revision": 0,
+  "edited_at": null,
+  "transcribe_numbers": true
+}

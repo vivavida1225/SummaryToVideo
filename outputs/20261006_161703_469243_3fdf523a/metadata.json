@@ -1,0 +1,35 @@
+{
+  "id": "20261006_161703_469243_3fdf523a",
+  "parent_id": null,
+  "state": "failed",
+  "source": "클립보드 / 직접 입력",
+  "created_at": "2026-10-06T07:17:03.469308+00:00",
+  "elapsed_seconds": 0.0,
+  "attempt": 0,
+  "max_attempts": 5,
+  "key_number": null,
+  "retry_at": null,
+  "scene_count": 5,
+  "body_char_count": null,
+  "warnings": [],
+  "error": "입력의 코스피 지수/등락 표기를 확인하세요.",
+  "output_dir": "outputs/20261006_161703_469243_3fdf523a",
+  "events": [
+    {
+      "at": "2026-10-06T07:17:03.469662+00:00",
+      "message": "HTML을 장면별 평문으로 변환합니다."
+    },
+    {
+      "at": "2026-10-06T07:17:03.502719+00:00",
+      "message": "입력의 코스피 지수/등락 표기를 확인하세요."
+    }
+  ],
+  "model": "gemini-3.6-flash",
+  "requested_model": "gemini-3.6-flash",
+  "attempted_models": [],
+  "validation_issues": [],
+  "excess_char_count": 0,
+  "revision": 0,
+  "edited_at": null,
+  "transcribe_numbers": true
+}

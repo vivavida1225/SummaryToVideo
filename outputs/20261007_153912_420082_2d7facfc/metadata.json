@@ -1,0 +1,56 @@
+{
+  "id": "20261007_153912_420082_2d7facfc",
+  "parent_id": "20261007_153544_786908_7bda1fce",
+  "state": "needs_review",
+  "source": "이전 직렬화 결과",
+  "created_at": "2026-10-07T06:39:12.420245+00:00",
+  "elapsed_seconds": 33.0,
+  "attempt": 2,
+  "max_attempts": 4,
+  "key_number": 1,
+  "retry_at": null,
+  "scene_count": 5,
+  "body_char_count": 583,
+  "warnings": [],
+  "error": null,
+  "output_dir": "outputs/20261007_153912_420082_2d7facfc",
+  "events": [
+    {
+      "at": "2026-10-07T06:39:12.420902+00:00",
+      "message": "보관된 직렬화 결과를 불러옵니다."
+    },
+    {
+      "at": "2026-10-07T06:39:12.431543+00:00",
+      "message": "Gemini 3.6 Flash 응답 대기 · 1/4회 · 키 1"
+    },
+    {
+      "at": "2026-10-07T06:39:42.909350+00:00",
+      "message": "Gemini 3.6 Flash: Gemini 서비스 오류입니다 (HTTP 503). → Gemini 3.5 Flash-Lite로 전환합니다."
+    },
+    {
+      "at": "2026-10-07T06:39:42.917392+00:00",
+      "message": "Gemini 3.5 Flash-Lite 응답 대기 · 2/4회 · 키 1"
+    },
+    {
+      "at": "2026-10-07T06:39:45.379266+00:00",
+      "message": "5줄 대본, 문장 수, 분량, 최종 지수와 등락을 검증합니다."
+    },
+    {
+      "at": "2026-10-07T06:39:45.396538+00:00",
+      "message": "검토 필요: 안전하게 자동 수정할 수 없는 부분이 있어 대본과 표시된 사유를 확인하세요."
+    }
+  ],
+  "model": "gemini-3.5-flash-lite",
+  "requested_model": "gemini-3.6-flash",
+  "attempted_models": [
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite"
+  ],
+  "validation_issues": [
+    "1장면에서 코스피 최종 종가 위치를 특정할 수 없습니다."
+  ],
+  "excess_char_count": 33,
+  "revision": 0,
+  "edited_at": null,
+  "transcribe_numbers": true
+}

@@ -1,0 +1,74 @@
+{
+  "id": "20260915_105201_472467_4c64c240",
+  "parent_id": null,
+  "state": "completed",
+  "source": "클립보드 / 직접 입력",
+  "created_at": "2026-09-15T01:52:01.472729+00:00",
+  "elapsed_seconds": 36.8,
+  "attempt": 3,
+  "max_attempts": 7,
+  "key_number": 1,
+  "retry_at": null,
+  "scene_count": 4,
+  "body_char_count": 534,
+  "warnings": [],
+  "error": null,
+  "output_dir": "outputs/20260915_105201_472467_4c64c240",
+  "events": [
+    {
+      "at": "2026-09-15T01:52:01.473518+00:00",
+      "message": "HTML을 장면별 평문으로 변환합니다."
+    },
+    {
+      "at": "2026-09-15T01:52:01.505415+00:00",
+      "message": "직렬화 결과를 클립보드에 복사합니다."
+    },
+    {
+      "at": "2026-09-15T01:52:01.538590+00:00",
+      "message": "직렬화 결과 자동 복사 완료"
+    },
+    {
+      "at": "2026-09-15T01:52:01.538859+00:00",
+      "message": "Gemini 3.8 Flash 응답 대기 · 1/7회 · 키 1"
+    },
+    {
+      "at": "2026-09-15T01:52:02.662523+00:00",
+      "message": "Gemini 3.8 Flash: Gemini 서비스 오류입니다 (HTTP 503). → Gemini 3.7 Flash로 전환합니다."
+    },
+    {
+      "at": "2026-09-15T01:52:02.670028+00:00",
+      "message": "Gemini 3.7 Flash 응답 대기 · 2/7회 · 키 1"
+    },
+    {
+      "at": "2026-09-15T01:52:22.096606+00:00",
+      "message": "Gemini 3.7 Flash: Gemini 서비스 오류입니다 (HTTP 503). → Gemini 3.6 Flash로 전환합니다."
+    },
+    {
+      "at": "2026-09-15T01:52:22.103770+00:00",
+      "message": "Gemini 3.6 Flash 응답 대기 · 3/7회 · 키 1"
+    },
+    {
+      "at": "2026-09-15T01:52:38.227852+00:00",
+      "message": "5줄 대본, 문장 수, 분량, 최종 지수와 등락을 검증합니다."
+    },
+    {
+      "at": "2026-09-15T01:52:38.242212+00:00",
+      "message": "압축 결과를 클립보드에 복사합니다."
+    },
+    {
+      "at": "2026-09-15T01:52:38.257486+00:00",
+      "message": "압축 결과 자동 복사 완료"
+    },
+    {
+      "at": "2026-09-15T01:52:38.257528+00:00",
+      "message": "1분 압축이 완료되었습니다."
+    }
+  ],
+  "model": "gemini-3.6-flash",
+  "requested_model": "gemini-3.8-flash",
+  "attempted_models": [
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash"
+  ]
+}

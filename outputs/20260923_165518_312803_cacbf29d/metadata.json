@@ -1,0 +1,44 @@
+{
+  "id": "20260923_165518_312803_cacbf29d",
+  "parent_id": "20260923_165414_906178_33471c58",
+  "state": "completed",
+  "source": "이전 직렬화 결과",
+  "created_at": "2026-09-23T07:55:18.312949+00:00",
+  "elapsed_seconds": 11.2,
+  "attempt": 1,
+  "max_attempts": 4,
+  "key_number": 1,
+  "retry_at": null,
+  "scene_count": 6,
+  "body_char_count": 519,
+  "warnings": [],
+  "error": null,
+  "output_dir": "outputs/20260923_165518_312803_cacbf29d",
+  "events": [
+    {
+      "at": "2026-09-23T07:55:18.313431+00:00",
+      "message": "보관된 직렬화 결과를 불러옵니다."
+    },
+    {
+      "at": "2026-09-23T07:55:18.323386+00:00",
+      "message": "Gemini 3.6 Flash 응답 대기 · 1/4회 · 키 1"
+    },
+    {
+      "at": "2026-09-23T07:55:29.523953+00:00",
+      "message": "5줄 대본, 문장 수, 분량, 최종 지수와 등락을 검증합니다."
+    },
+    {
+      "at": "2026-09-23T07:55:29.543866+00:00",
+      "message": "1분 압축이 완료되었습니다."
+    }
+  ],
+  "model": "gemini-3.6-flash",
+  "requested_model": "gemini-3.6-flash",
+  "attempted_models": [
+    "gemini-3.6-flash"
+  ],
+  "validation_issues": [],
+  "excess_char_count": 0,
+  "revision": 0,
+  "edited_at": null
+}

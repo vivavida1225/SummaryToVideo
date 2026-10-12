@@ -1,0 +1,56 @@
+{
+  "id": "20261006_162720_104386_d98279d6",
+  "parent_id": null,
+  "state": "needs_review",
+  "source": "클립보드 / 직접 입력",
+  "created_at": "2026-10-06T07:27:20.104600+00:00",
+  "elapsed_seconds": 8.2,
+  "attempt": 2,
+  "max_attempts": 5,
+  "key_number": 1,
+  "retry_at": null,
+  "scene_count": 5,
+  "body_char_count": 575,
+  "warnings": [],
+  "error": null,
+  "output_dir": "outputs/20261006_162720_104386_d98279d6",
+  "events": [
+    {
+      "at": "2026-10-06T07:27:20.105019+00:00",
+      "message": "HTML을 장면별 평문으로 변환합니다."
+    },
+    {
+      "at": "2026-10-06T07:27:20.163427+00:00",
+      "message": "Gemini 3.6 Flash 응답 대기 · 1/5회 · 키 1"
+    },
+    {
+      "at": "2026-10-06T07:27:25.427748+00:00",
+      "message": "Gemini 3.6 Flash: Gemini 서비스 오류입니다 (HTTP 503). → Gemini 3.5 Flash-Lite로 전환합니다."
+    },
+    {
+      "at": "2026-10-06T07:27:25.437178+00:00",
+      "message": "Gemini 3.5 Flash-Lite 응답 대기 · 2/5회 · 키 1"
+    },
+    {
+      "at": "2026-10-06T07:27:28.220823+00:00",
+      "message": "5줄 대본, 문장 수, 분량, 최종 지수와 등락을 검증합니다."
+    },
+    {
+      "at": "2026-10-06T07:27:28.244383+00:00",
+      "message": "검토 필요: 안전하게 자동 수정할 수 없는 부분이 있어 대본과 표시된 사유를 확인하세요."
+    }
+  ],
+  "model": "gemini-3.5-flash-lite",
+  "requested_model": "gemini-3.6-flash",
+  "attempted_models": [
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite"
+  ],
+  "validation_issues": [
+    "숫자 앞 경계를 확인할 수 없습니다: 2"
+  ],
+  "excess_char_count": 25,
+  "revision": 0,
+  "edited_at": null,
+  "transcribe_numbers": true
+}
