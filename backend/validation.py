@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal
 
+from .strength_validation import find_strength_issues
 from .transcribe_numbers import (NumberTranscriptionError, is_preserved_numeric_label, number_to_korean,
                                  transcribe_numeric_tokens)
 
@@ -358,12 +359,15 @@ def _validate_transcribed_indices(first_line: str, serialized: str) -> list[str]
 
 def validate_compressed(response: str, serialized: str, *, transcribe_numbers: bool = False) -> ValidatedText:
     index_triples(serialized)  # Invalid source cannot be repaired by rewriting the response.
+    strength_issues = find_strength_issues(response, serialized)
+    issues = list(strength_issues)
+    numeric_review = False
     if transcribe_numbers:
         try:
             response = transcribe_numeric_tokens(_correct_transcribed_closes(response, serialized))
         except NumberTranscriptionError as exc:
-            raise ValidationError(str(exc), requires_review=True) from None
-    issues = []
+            issues.append(str(exc))
+            numeric_review = True
     body = response.replace('\r\n', '\n').strip('\n')
     lines = body.split('\n')
     if len(lines) != 5 or any(not line.strip() for line in lines):
@@ -388,8 +392,9 @@ def validate_compressed(response: str, serialized: str, *, transcribe_numbers: b
             issues.append(f'장면 {i}: 인사말을 제외한 본문은 마침표로 끝나는 1~2문장이어야 합니다.')
         if re.search(r'[!?。！？]', content):
             issues.append(f'장면 {i}: 본문 문장은 마침표로 끝내세요.')
-    issues.extend(_validate_transcribed_indices(lines[0], serialized) if transcribe_numbers
-                  else _validate_indices(lines[0], serialized))
+    if not numeric_review:
+        issues.extend(_validate_transcribed_indices(lines[0], serialized) if transcribe_numbers
+                      else _validate_indices(lines[0], serialized))
     chars = count_characters(body)
     if chars < MIN_CHARS:
         issues.append(f'전체 대본은 {MIN_CHARS}~{MAX_CHARS}자여야 합니다. 현재 {chars}자로 '
@@ -400,5 +405,6 @@ def validate_compressed(response: str, serialized: str, *, transcribe_numbers: b
                               f'{chars - MAX_CHARS}자 초과합니다. 중복과 세부 정보를 줄이세요 '
                               '(인사말·숫자·공백 포함, 개행 제외).')
     if issues:
-        raise ValidationError(issues, body_char_count=chars, text=body)
+        raise ValidationError(issues, body_char_count=chars, text=body,
+                              requires_review=bool(strength_issues) or numeric_review)
     return ValidatedText(body, chars, [])
