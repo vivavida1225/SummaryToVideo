@@ -8,6 +8,7 @@ from backend.compression import Compressor, ResponseValidationError
 from backend.config import Settings
 from backend.jobs import JobManager
 from backend.narration import decode_response, validate_response
+from backend.transcribe_numbers import transcribe_numeric_tokens
 from backend.validation import ValidationError, count_characters
 from tests.test_compression import Transport
 
@@ -63,13 +64,15 @@ def test_strength_candidate_stops_after_one_call_and_preserves_raw(
     assert len(transport.calls) == 1
     assert transport.calls[0]['feedback'] == ''
     assert '다른 사실의 급락' in transport.calls[0]['prompt']
-    assert '위험자산 회피 경향이 강해졌습니다.' in transport.calls[0]['prompt']
+    assert '시장 리스크 오프가 심화됐습니다.' in transport.calls[0]['prompt']
     assert raw_saved == invalid_saved == [strength_draft]
     assert caught.value.requires_review
     assert any('강도' in issue for issue in caught.value.validation_issues)
 
 
-def test_review_persistence_and_explicit_retry_use_original_source(tmp_path, serialized, strength_draft):
+@pytest.mark.parametrize('transcribe_numbers', [False, True])
+def test_review_persistence_and_explicit_retry_use_original_source(
+        tmp_path, serialized, strength_draft, transcribe_numbers):
     async def scenario():
         settings = Settings(tmp_path)
         settings.prompt_path.parent.mkdir(parents=True)
@@ -77,30 +80,38 @@ def test_review_persistence_and_explicit_retry_use_original_source(tmp_path, ser
             (ROOT / 'prompts/compress_to_1min.txt').read_text(encoding='utf-8'), encoding='utf-8')
         (tmp_path / '.env').write_text('GEMINI_API_KEY_1=fake', encoding='utf-8')
         source = serialized + '\n시장 리스크 오프 심화'
+        expected_draft = transcribe_numeric_tokens(strength_draft) if transcribe_numbers else strength_draft
         transport = Transport([strength_draft, strength_draft])
         manager = JobManager(settings, compressor_factory=lambda **options: Compressor(
             settings.prompt_path, transport=transport, **options))
-        first = manager.start(snapshot=source)
+        first = manager.start(snapshot=source, transcribe_numbers=transcribe_numbers)
         await manager.wait(first['id'])
         job = manager.get(first['id'])
         assert job['state'] == 'needs_review'
-        assert job['compressed'] == strength_draft
+        assert job['compressed'] == expected_draft
         assert len(transport.calls) == 1
         folder = tmp_path / job['output_dir']
-        for name in ('raw_response_1.txt', 'invalid_response_1.txt', 'compressed.txt'):
+        for name in ('raw_response_1.txt', 'invalid_response_1.txt'):
             assert (folder / name).read_text(encoding='utf-8') == strength_draft
+        assert (folder / 'compressed.txt').read_text(encoding='utf-8') == expected_draft
         metadata = json.loads((folder / 'metadata.json').read_text(encoding='utf-8'))
         assert metadata['state'] == 'needs_review'
         assert metadata['validation_issues'] == job['validation_issues']
         restored = JobManager(settings)
         assert restored.get(first['id'])['validation_issues'] == job['validation_issues']
-        assert restored.get(first['id'])['compressed'] == strength_draft
+        assert restored.get(first['id'])['compressed'] == expected_draft
         second = manager.retry(first['id'])
         await manager.wait(second['id'])
         assert len(transport.calls) == 2
         assert transport.calls[1]['source'] == source
-        assert transport.calls[1]['previous_response'] == strength_draft
+        assert transport.calls[1]['previous_response'] == expected_draft
         assert '다른 사실의 급락' in transport.calls[1]['feedback']
+        for instructions in (transport.calls[0]['prompt'], transport.calls[1]['prompt'],
+                             transport.calls[1]['feedback']):
+            assert '[원문 표현 보존]' in instructions
+            assert '최초 입력 원문의 표현' in instructions
+            assert '우려가 심화했습니다.' in instructions
+        assert manager.get(second['id'])['transcribe_numbers'] == transcribe_numbers
         assert manager.get(second['id'])['state'] == 'needs_review'
 
     asyncio.run(scenario())

@@ -78,6 +78,39 @@ def execute(tmp_path, serialized, answers, keys=None, **options):
     return result, transport, events, sleeps, invalid
 
 
+@pytest.mark.parametrize('transcribe_numbers', [False, True])
+def test_source_expression_guidance_reaches_generation_and_automatic_repair(
+        tmp_path, serialized, compressed, transcribe_numbers):
+    prompt = tmp_path / 'prompt.txt'
+    prompt.write_text('Instructions\n{{SCENE_MARKET_DATA}}', encoding='utf-8')
+    source = serialized + '\n상대적 강세'
+    first_scene = compressed.splitlines()[0]
+    draft = first_scene + '\n선방했습니다.'
+    transport = Transport([draft, first_scene + '\n상대적인 강세를 보였습니다.'])
+    runner = Compressor(prompt, [(1, 'fake')], transport=transport,
+                        transcribe_numbers=transcribe_numbers)
+
+    with pytest.raises(ResponseValidationError):
+        asyncio.run(runner.run(source, lambda *args, **kwargs: None, lambda *args: None))
+
+    assert len(transport.calls) == 2
+    initial, repair = transport.calls
+    assert initial['feedback'] == ''
+    assert initial['previous_response'] == ''
+    assert initial['source'] == repair['source'] == source
+    assert repair['previous_response'] == draft
+    for instructions in (initial['prompt'], repair['prompt'], repair['feedback']):
+        assert '[원문 표현 보존]' in instructions
+        assert '핵심 용어·동사·수식어' in instructions
+        assert '조사·존댓말 어미·문장 연결' in instructions
+        assert '최초 입력 원문의 표현' in instructions
+        assert '우려가 심화했습니다.' in instructions
+        assert '상대적인 강세를 보였습니다.' in instructions
+    assert '치솟다' in initial['prompt'] and '치솟다' in repair['feedback']
+    number_heading = '[수치 한국어 전사]' if transcribe_numbers else '[수치 표기 유지 - 한국어 전사 꺼짐]'
+    assert number_heading in initial['prompt'] and number_heading in repair['feedback']
+
+
 def test_switches_models_without_waiting_on_429_and_server_error(tmp_path, serialized, compressed):
     result, transport, events, sleeps, _ = execute(tmp_path, serialized,
         [ProviderError('호출 한도', retryable=True, retry_after=9), ProviderError('서버 오류', retryable=True), compressed])
