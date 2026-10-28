@@ -7,7 +7,7 @@ from backend.gemini import ProviderError
 from tests.test_compression import Transport
 
 
-MODELS = ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite']
+MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite']
 
 
 def runner(tmp_path, answers, **kwargs):
@@ -23,13 +23,20 @@ def run(compressor, source, events=None):
                                       lambda *args: None))
 
 
-def test_fourth_model_can_repair_and_finish(tmp_path, serialized, compressed):
-    compressor, transport = runner(tmp_path, [ProviderError('quota', retryable=True)] * 3 + ['bad', compressed])
+def test_last_model_can_repair_and_finish(tmp_path, serialized, compressed):
+    compressor, transport = runner(tmp_path, [ProviderError('quota', retryable=True)] * 2 + ['bad', compressed])
     events = []
     assert run(compressor, serialized, events).text == compressed
     assert [call['model'] for call in transport.calls] == MODELS + [MODELS[-1]]
-    assert [call['key'] for call in transport.calls] == ['a'] * 5
-    assert [f['attempt'] for s, f in events if s == 'requesting'] == [1, 2, 3, 4, 5]
+    assert [call['key'] for call in transport.calls] == ['a'] * 4
+    assert [f['attempt'] for s, f in events if s == 'requesting'] == [1, 2, 3, 4]
+
+
+def test_routed_legacy_model_starts_at_replacement_without_duplicate_calls(tmp_path, serialized, compressed):
+    compressor, transport = runner(tmp_path, [ProviderError('quota', retryable=True), compressed],
+                                   model='gemini-3.7-flash')
+    assert run(compressor, serialized).text == compressed
+    assert [call['model'] for call in transport.calls] == ['gemini-3.8-flash', 'gemini-3.6-flash']
 
 
 @pytest.mark.parametrize('model,expected', [(MODELS[1], MODELS[1:]), (MODELS[-1], MODELS[-1:])])
@@ -63,11 +70,11 @@ def test_repair_context_survives_model_fallback(tmp_path, serialized, compressed
 
 
 def test_model_exhaustion_lists_attempted_models(tmp_path, serialized):
-    compressor, transport = runner(tmp_path, [ProviderError('quota', retryable=True)] * 4)
+    compressor, transport = runner(tmp_path, [ProviderError('quota', retryable=True)] * 3)
     with pytest.raises(CompressionError) as caught:
         run(compressor, serialized)
     assert all(model in str(caught.value) for model in MODELS)
-    assert len(transport.calls) == 4
+    assert len(transport.calls) == 3
 
 
 def test_deadline_prevents_next_call(tmp_path, serialized):
@@ -87,11 +94,11 @@ def test_remaining_time_caps_transport_timeout(tmp_path, serialized, compressed)
 
 def test_combined_key_model_and_repair_budget(tmp_path, serialized, compressed):
     compressor, transport = runner(tmp_path, [ProviderError('auth', action='next_key')] * 2
-                                   + [ProviderError('quota', retryable=True)] * 3 + ['bad', compressed],
+                                   + [ProviderError('quota', retryable=True)] * 2 + ['bad', compressed],
                                    keys=[(1, 'a'), (2, 'b'), (3, 'c')])
     assert run(compressor, serialized).text == compressed
-    assert len(transport.calls) == 7
-    assert [c['key'] for c in transport.calls] == ['a', 'b', 'c', 'c', 'c', 'c', 'c']
+    assert len(transport.calls) == 6
+    assert [c['key'] for c in transport.calls] == ['a', 'b', 'c', 'c', 'c', 'c']
 
 
 def test_duplicate_rejected_credentials_are_never_reused(tmp_path, serialized, compressed):

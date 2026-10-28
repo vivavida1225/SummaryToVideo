@@ -11,6 +11,17 @@ from .validation import (MIN_CHARS, MAX_CHARS, TARGET_CHARS, ValidatedText, Vali
                          count_characters, index_triples, validate_compressed)
 
 
+HANJA_PROHIBITION_CONTRACT = '''
+[한자 사용 금지]
+출력 대본 전체에서 한자 문자를 사용하지 않는다. 한글로 적힌 한자어는 허용한다.
+원문에 한자가 있어도 의미가 확실한 한국어 표기로 작성한다.
+이 규칙은 원문 표기 보존보다 우선하며, 불명확한 고유명사의 독음은 추측하지 않는다.
+표기를 확정할 수 없으면 다른 원문 사실을 선택하되, 사실을 새로 만들거나 의미를 바꾸지 않는다.
+한자 표기에 대한 이 예외 외에는 영문 약어·고유명사와 선택된 수치 표기 규칙을 유지한다.
+최초 생성과 모든 보정·재생성에 적용하며, 출력 직전 모든 장면에 한자가 남아 있지 않은지 확인한다.
+'''
+
+
 SOURCE_EXPRESSION_PRESERVATION_CONTRACT = '''
 [원문 표현 보존]
 원문에 있는 표현을 최대한 변형하지 않고 그대로 활용한다.
@@ -23,7 +34,7 @@ SOURCE_EXPRESSION_PRESERVATION_CONTRACT = '''
 원문 ‘우려가 심화했다’: 우선 ‘우려가 심화했습니다.’ / 금지 ‘우려가 크게 번졌습니다.’
 원문 ‘안전자산 선호 확대’: 우선 ‘안전자산 선호가 확대됐습니다.’ / 금지 ‘안전자산 선호가 급격히 커졌습니다.’
 원문 ‘상대적 강세’: 우선 ‘상대적인 강세를 보였습니다.’ / 피할 변형 ‘선방했습니다.’, ‘급등했습니다.’
-기존 금지 표현 규칙과 선택된 수치 전사 규칙은 원문 표현 보존보다 우선 적용한다.
+한자 금지·기존 금지 표현 규칙과 선택된 수치 전사 규칙은 원문 표현 보존보다 우선 적용한다.
 출력 전 핵심 용어·동사·수식어가 최초 입력과 같은지 확인하고 불필요한 바꿔 쓰기를 원문 표현으로 되돌린다.
 '''
 
@@ -79,7 +90,7 @@ OUTPUT_CONTRACT = '''
 수정 후 글자 수와 문장 수를 다시 확인한다. 분량을 채우기 위한 사실 추가·반복·의미 없는 수식어는 금지한다.
 입력 근거를 모두 활용해도 하한을 채울 수 없는 경우에만 사실 정확성을 분량보다 우선한다.
 최종 응답에는 <SCENE_BREAK>로 연결한 대본 5개 장면만 출력하며, 외부 조사나 도구 호출은 하지 않는다.
-''' + SOURCE_EXPRESSION_PRESERVATION_CONTRACT + STRENGTH_PRESERVATION_CONTRACT
+''' + SOURCE_EXPRESSION_PRESERVATION_CONTRACT + STRENGTH_PRESERVATION_CONTRACT + HANJA_PROHIBITION_CONTRACT
 
 
 TRANSCRIBE_NUMBERS_CONTRACT = '''
@@ -159,7 +170,7 @@ def _repair_feedback(error: ValidationError, raw: str) -> str:
 - 읽기 쉽게 만드는 작업은 원문의 핵심 표현을 유지하면서 조사·어미·문장 연결만 최소한으로 다듬는 것입니다. 고유명사를 발음대로 한글로 변환하지 마세요. 숫자는 수치 전사 계약에 따라 처리하세요.
 - 각 수치의 대상·기간·단위·범위를 최초 입력과 대조하세요. 전체 수출 금액을 반도체 수출 금액으로 바꾸는 등 전체와 부분을 혼동하지 마세요.
 - 이전 초안에 잘못된 약어·고유명사·수치 연결이 있어도 그대로 유지하지 말고 최초 입력 원문에 맞게 바로잡으세요.
-출력 직전 구분자 4개와 구분자 제외 글자 수를 다시 확인하세요.''' + SOURCE_EXPRESSION_PRESERVATION_CONTRACT + STRENGTH_PRESERVATION_CONTRACT
+출력 직전 구분자 4개와 구분자 제외 글자 수를 다시 확인하세요.''' + SOURCE_EXPRESSION_PRESERVATION_CONTRACT + STRENGTH_PRESERVATION_CONTRACT + HANJA_PROHIBITION_CONTRACT
 
 
 class Compressor:

@@ -43,6 +43,7 @@ class JobManager:
             raise JobConflict(self.active_id)
         model = model if model is not None else self.settings.model
         candidates = model_candidates(model)
+        model = candidates[0]
         keys = list(self.settings.keys())
         job_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f_') + uuid.uuid4().hex[:8]
         job = dict(id=job_id, parent_id=parent_id, state='queued', source=file_path or ('이전 직렬화 결과' if parent_id else '클립보드 / 직접 입력'),

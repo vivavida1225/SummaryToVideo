@@ -116,7 +116,7 @@ def test_switches_models_without_waiting_on_429_and_server_error(tmp_path, seria
         [ProviderError('호출 한도', retryable=True, retry_after=9), ProviderError('서버 오류', retryable=True), compressed])
     assert result.text.startswith('오늘의 AI 시황입니다.')
     assert [c['key'] for c in transport.calls] == ['secret-a'] * 3
-    assert [c['model'] for c in transport.calls] == ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash']
+    assert [c['model'] for c in transport.calls] == ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite']
     assert sleeps == []
     assert [f['attempt'] for s, f in events if s == 'requesting'] == [1, 2, 3]
     assert all(c['source'] == serialized for c in transport.calls)
@@ -212,9 +212,9 @@ def test_final_validation_failure_carries_exact_last_response(tmp_path, serializ
     assert caught.value.response == last
 
 
-def test_four_transient_failures_stop(tmp_path, serialized):
-    with pytest.raises(CompressionError, match='4회'):
-        execute(tmp_path, serialized, [ProviderError('timeout', retryable=True)] * 4)
+def test_three_transient_failures_stop(tmp_path, serialized):
+    with pytest.raises(CompressionError, match='3회'):
+        execute(tmp_path, serialized, [ProviderError('timeout', retryable=True)] * 3)
 
 
 def test_non_retryable_request_error_stops_first_attempt(tmp_path, serialized):
@@ -250,4 +250,4 @@ def test_unresponsive_transport_times_out_and_switches_model(tmp_path, serialize
     result = asyncio.run(runner.run(serialized, lambda *a, **k: None, lambda *a: None))
     assert result.text.startswith('오늘의 AI 시황입니다.')
     assert [c['key'] for c in transport.calls] == ['a', 'a']
-    assert [c['model'] for c in transport.calls] == ['gemini-3.8-flash', 'gemini-3.7-flash']
+    assert [c['model'] for c in transport.calls] == ['gemini-3.8-flash', 'gemini-3.6-flash']

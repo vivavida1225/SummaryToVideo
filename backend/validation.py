@@ -4,6 +4,7 @@ These deterministic checks are not a general Korean fact/causality checker.
 """
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -357,6 +358,25 @@ def _validate_transcribed_indices(first_line: str, serialized: str) -> list[str]
     return issues
 
 
+def _find_hanja_issues(text: str) -> list[str]:
+    """Report Han ideographs without normalizing or rewriting the narration."""
+    issues = []
+    for scene, line in enumerate(text.split('\n'), 1):
+        matches = [(index, char) for index, char in enumerate(line)
+                   if char == '〇' or unicodedata.name(char, '').startswith(
+                       ('CJK UNIFIED IDEOGRAPH-', 'CJK COMPATIBILITY IDEOGRAPH-'))]
+        if not matches:
+            continue
+        characters = ', '.join(f"'{char}'(U+{ord(char):04X})"
+                               for char in dict.fromkeys(char for _, char in matches))
+        first = matches[0][0]
+        start, end = max(0, first - 12), min(len(line), first + 13)
+        context = ('…' if start else '') + line[start:end] + ('…' if end < len(line) else '')
+        issues.append(f'장면 {scene}: 한자 {characters}가 포함되어 있습니다. '
+                      f'한국어 표기를 확인하세요. 문맥: {context}')
+    return issues
+
+
 def validate_compressed(response: str, serialized: str, *, transcribe_numbers: bool = False) -> ValidatedText:
     index_triples(serialized)  # Invalid source cannot be repaired by rewriting the response.
     strength_issues = find_strength_issues(response, serialized)
@@ -369,6 +389,8 @@ def validate_compressed(response: str, serialized: str, *, transcribe_numbers: b
             issues.append(str(exc))
             numeric_review = True
     body = response.replace('\r\n', '\n').strip('\n')
+    hanja_issues = _find_hanja_issues(body)
+    issues.extend(hanja_issues)
     lines = body.split('\n')
     if len(lines) != 5 or any(not line.strip() for line in lines):
         issues.append('빈 줄 없이 정확히 5줄인 일반 텍스트 대본이 필요합니다.')
@@ -406,5 +428,5 @@ def validate_compressed(response: str, serialized: str, *, transcribe_numbers: b
                               '(인사말·숫자·공백 포함, 개행 제외).')
     if issues:
         raise ValidationError(issues, body_char_count=chars, text=body,
-                              requires_review=bool(strength_issues) or numeric_review)
+                              requires_review=bool(strength_issues or hanja_issues) or numeric_review)
     return ValidatedText(body, chars, [])

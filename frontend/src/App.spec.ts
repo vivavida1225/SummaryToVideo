@@ -8,7 +8,6 @@ const session = {
   token: 'session-token', model: 'gemini-3.8-flash', configured_keys: [1, 3],
   models: [
     { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
-    { id: 'gemini-3.7-flash', label: 'Gemini 3.7 Flash' },
     { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash' },
     { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite' },
   ],
@@ -303,7 +302,7 @@ describe('App', () => {
     await finishBootstrap()
     await fireEvent.click(screen.getByRole('radio', { name: '저장된 파일' }))
     await fireEvent.update(screen.getByRole('combobox', { name: 'HTML 파일 선택' }), '오늘 시장.html')
-    await fireEvent.update(screen.getByRole('combobox', { name: '시작 모델' }), 'gemini-3.7-flash')
+    await fireEvent.update(screen.getByRole('combobox', { name: '시작 모델' }), 'gemini-3.6-flash')
     await fireEvent.click(screen.getByRole('button', { name: '불러오기 설정' }))
     await fireEvent.update(screen.getByLabelText('날짜'), '2026-09-17')
     await fireEvent.update(screen.getByLabelText('gubun'), '1')
@@ -316,7 +315,7 @@ describe('App', () => {
     expect(new Headers(imports[0]?.[1]?.headers).get('X-App-Token')).toBe('session-token')
     const jobs = fetchMock.mock.calls.filter(([request]) => requestPath(request) === '/api/jobs')
     expect(jobs).toHaveLength(1)
-    expect(JSON.parse(String(jobs[0]?.[1]?.body))).toEqual({ html, model: 'gemini-3.7-flash', transcribe_numbers: false })
+    expect(JSON.parse(String(jobs[0]?.[1]?.body))).toEqual({ html, model: 'gemini-3.6-flash', transcribe_numbers: false })
     expect(fetchMock.mock.calls.some(([request]) => /\/(copy|retry)$/.test(requestPath(request)))).toBe(false)
   })
 
@@ -412,6 +411,39 @@ describe('App', () => {
     expect(fetchMock.mock.calls.some(([request]) => requestPath(request) === '/api/jobs')).toBe(false)
   })
 
+  it('한자 검토 대본의 사유를 표시하고 수동 복사·다운로드·재생성을 허용한다', async () => {
+    sessionStorage.setItem('market-compressor.job-id', 'job-1')
+    const draft = '오늘의 AI 시황입니다.\n中동 긴장으로 유가가 올랐습니다.'
+    const issue = "장면 2: 한자 '中'(U+4E2D)가 포함되어 있습니다. 한국어 표기를 확인하세요. 문맥: 中동 긴장으로 유가가 올랐…"
+    const review = makeJob({ state: 'needs_review', serialized: '보관된 원문', compressed: draft,
+      validation_issues: [issue] })
+    const fetchMock = installBootstrapFetch(path => {
+      if (path === '/api/jobs/job-1') return jsonResponse(review)
+      if (path === '/api/jobs/job-1/copy') return jsonResponse({ ok: true })
+      if (path === '/api/jobs/job-1/artifacts/compressed.txt') return new Response(draft)
+      if (path === '/api/jobs/job-1/retry') return jsonResponse(makeJob({ id: 'regenerated' }), 202)
+      return jsonResponse({}, 404)
+    })
+    vi.stubGlobal('URL', Object.assign(URL, {
+      createObjectURL: vi.fn(() => 'blob:download'), revokeObjectURL: vi.fn(),
+    }))
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    render(App)
+    expect(await screen.findByText(issue)).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('생성된 대본을 확인하세요')
+    expect(screen.getByRole('textbox', { name: '압축 결과' })).toHaveValue(draft)
+    await waitFor(() => expect(screen.getByRole('button', { name: '대본 재생성' })).toBeEnabled())
+    await new Promise(resolve => setTimeout(resolve, 1100))
+    expect(fetchMock.mock.calls.filter(([request]) => requestPath(request) === '/api/jobs/job-1')).toHaveLength(1)
+    expect(fetchMock.mock.calls.some(([request]) => /\/(copy|retry)$/.test(requestPath(request)))).toBe(false)
+    await fireEvent.click(screen.getByRole('button', { name: '압축 결과 복사' }))
+    await screen.findByText('압축 결과를 클립보드에 복사했습니다.')
+    await fireEvent.click(screen.getByRole('button', { name: '압축 결과 다운로드' }))
+    await waitFor(() => expect(clickSpy).toHaveBeenCalledOnce())
+    await fireEvent.click(screen.getByRole('button', { name: '대본 재생성' }))
+    expect(fetchMock.mock.calls.filter(([request]) => requestPath(request).endsWith('/retry'))).toHaveLength(1)
+  })
+
   it('초과 대본을 복원하고 명시적 재생성에서만 요청한다', async () => {
     sessionStorage.setItem('market-compressor.job-id', 'job-1')
     const review = makeJob({ state: 'needs_review', serialized: '보관된 원문', compressed: '가'.repeat(551),
@@ -432,13 +464,13 @@ describe('App', () => {
     expect(fetchMock.mock.calls.some(([request]) => requestPath(request).endsWith('/retry'))).toBe(false)
     await fireEvent.click(screen.getByRole('button', { name: '압축 결과 복사' }))
     await screen.findByText('압축 결과를 클립보드에 복사했습니다.')
-    await fireEvent.update(screen.getByRole('combobox', { name: '시작 모델' }), 'gemini-3.7-flash')
+    await fireEvent.update(screen.getByRole('combobox', { name: '시작 모델' }), 'gemini-3.6-flash')
     const regenerate = screen.getByRole('button', { name: '대본 재생성' })
     await fireEvent.click(regenerate)
     await fireEvent.click(regenerate)
     const calls = fetchMock.mock.calls.filter(([request]) => requestPath(request).endsWith('/retry'))
     expect(calls).toHaveLength(1)
-    expect(JSON.parse(String(calls[0]?.[1]?.body))).toEqual({ model: 'gemini-3.7-flash' })
+    expect(JSON.parse(String(calls[0]?.[1]?.body))).toEqual({ model: 'gemini-3.6-flash' })
   })
 
   it('시작 모델을 저장해 요청에 전달하고 작업 중에는 변경을 막는다', async () => {
@@ -449,26 +481,28 @@ describe('App', () => {
     const select = screen.getByRole('combobox', { name: '시작 모델' })
     expect(select).toHaveValue('gemini-3.8-flash')
     expect(Array.from((select as HTMLSelectElement).options).map(option => option.value)).toEqual([
-      'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite',
+      'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite',
     ])
-    await fireEvent.update(select, 'gemini-3.7-flash')
-    expect(localStorage.getItem('market-compressor.model')).toBe('gemini-3.7-flash')
+    await fireEvent.update(select, 'gemini-3.6-flash')
+    expect(localStorage.getItem('market-compressor.model')).toBe('gemini-3.6-flash')
     await fireEvent.click(screen.getByRole('button', { name: '변환 및 1분 압축' }))
     await waitFor(() => expect(select).toBeDisabled())
     const call = fetchMock.mock.calls.find(([request]) => requestPath(request) === '/api/jobs')
     expect(JSON.parse(String(call?.[1]?.body))).toEqual({
-      html: '<article>오늘의 시장</article>', model: 'gemini-3.7-flash', transcribe_numbers: false,
+      html: '<article>오늘의 시장</article>', model: 'gemini-3.6-flash', transcribe_numbers: false,
     })
   })
 
   it.each([
     ['gemini-3.6-flash', 'gemini-3.6-flash'], ['removed-model', 'gemini-3.8-flash'],
+    ['gemini-3.7-flash', 'gemini-3.8-flash'],
   ])('저장된 모델 %s를 복원한다', async (saved, expected) => {
     localStorage.setItem('market-compressor.model', saved)
     installBootstrapFetch(() => jsonResponse({}, 404))
     render(App)
     await finishBootstrap()
     expect(screen.getByRole('combobox', { name: '시작 모델' })).toHaveValue(expected)
+    expect(localStorage.getItem('market-compressor.model')).toBe(expected)
   })
 
   it('브라우저 저장소가 차단되어도 모델을 선택하고 실행한다', async () => {

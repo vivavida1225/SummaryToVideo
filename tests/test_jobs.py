@@ -240,10 +240,10 @@ def test_job_snapshots_model_and_keys_before_async_execution(tmp_path, tiny_html
         manager.settings.model = 'gemini-3.5-flash-lite'
         await manager.wait(job['id'])
         assert transport.calls[0]['key'] == 'original'
-        assert transport.calls[0]['model'] == 'gemini-3.7-flash'
+        assert transport.calls[0]['model'] == 'gemini-3.8-flash'
         result = manager.get(job['id'])
         assert result['state'] == 'completed' and result['max_attempts'] == 4
-        assert result['requested_model'] == 'gemini-3.7-flash'
+        assert result['requested_model'] == 'gemini-3.8-flash'
     asyncio.run(scenario())
 
 
@@ -256,7 +256,7 @@ def test_transport_exhaustion_preserves_draft_without_auto_copy(tmp_path, tiny_h
         manager, clipboard, _ = setup(tmp_path, None)
         prompt = tmp_path / 'prompt.txt'
         prompt.write_text('instructions', encoding='utf-8')
-        transport = Transport([ProviderError('quota', retryable=True)] * 3 + ['saved draft', ProviderError('timeout', retryable=True)])
+        transport = Transport([ProviderError('quota', retryable=True)] * 2 + ['saved draft', ProviderError('timeout', retryable=True)])
         manager.compressor_factory = lambda **options: RealCompressor(prompt, [(1, 'fake')], transport=transport, model=options['model'])
         job = manager.start(html=tiny_html)
         await manager.wait(job['id'])
@@ -264,9 +264,46 @@ def test_transport_exhaustion_preserves_draft_without_auto_copy(tmp_path, tiny_h
         assert result['state'] == 'failed' and result['compressed'] == 'saved draft'
         assert result['model'] == 'gemini-3.5-flash-lite'
         assert result['requested_model'] == 'gemini-3.8-flash'
-        assert len(result['attempted_models']) == 4 and result['attempt'] == 5
+        assert len(result['attempted_models']) == 3 and result['attempt'] == 4
         assert clipboard.writes == []
-        assert (tmp_path / result['output_dir'] / 'raw_response_4.txt').read_text(encoding='utf-8') == 'saved draft'
+        assert (tmp_path / result['output_dir'] / 'raw_response_3.txt').read_text(encoding='utf-8') == 'saved draft'
         restored = JobManager(manager.settings, clipboard=clipboard)
         assert restored.artifact(job['id'], 'compressed.txt') == 'saved draft'
+    asyncio.run(scenario())
+
+
+def test_legacy_job_retry_after_restart_uses_replacement_and_preserves_history(tmp_path, tiny_html, compressed):
+    from backend.compression import Compressor as RealCompressor
+    from backend.gemini import ProviderError
+    from tests.test_compression import Transport
+
+    async def scenario():
+        manager, clipboard, _ = setup(tmp_path, compressed)
+        prompt = tmp_path / 'prompt.txt'
+        prompt.write_text('instructions', encoding='utf-8')
+        transport = Transport([ProviderError('quota', retryable=True)] * 3)
+        manager.compressor_factory = lambda **options: RealCompressor(prompt, [(1, 'fake')],
+            transport=transport, model=options['model'])
+        first = manager.start(html=tiny_html)
+        await manager.wait(first['id'])
+        original = manager.get(first['id'])
+        assert original['state'] == 'failed'
+        original.update(model='gemini-3.7-flash', requested_model='gemini-3.7-flash')
+        manager.store.metadata(original)
+        metadata = tmp_path / original['output_dir'] / 'metadata.json'
+        history = metadata.read_bytes()
+
+        restored = JobManager(manager.settings, clipboard=clipboard)
+        retry_transport = Transport([compressed])
+        restored.compressor_factory = lambda **options: RealCompressor(prompt, [(1, 'fake')],
+            transport=retry_transport, model=options['model'])
+        retry = restored.retry(first['id'])
+        await restored.wait(retry['id'])
+        result = restored.get(retry['id'])
+        assert result['state'] == 'completed'
+        assert result['requested_model'] == 'gemini-3.8-flash'
+        assert retry_transport.calls[0]['model'] == 'gemini-3.8-flash'
+        assert retry_transport.calls[0]['source'] == original['serialized']
+        assert restored.get(first['id'])['requested_model'] == 'gemini-3.7-flash'
+        assert metadata.read_bytes() == history
     asyncio.run(scenario())

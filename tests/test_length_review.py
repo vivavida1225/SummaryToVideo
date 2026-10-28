@@ -132,7 +132,7 @@ def test_review_retry_api_restores_context_after_restart(tmp_path, tiny_html, co
         second = response.json()
         c.portal.call(c.app.state.manager.wait, second['id'])
         assert c.get(f"/api/jobs/{second['id']}", headers=headers).json()['state'] == 'completed'
-        assert calls[1]['previous_response'] == draft and calls[1]['model'] == 'gemini-3.7-flash'
+        assert calls[1]['previous_response'] == draft and calls[1]['model'] == 'gemini-3.8-flash'
 
 
 def test_explicit_regeneration_preserves_context_across_key_failure(tmp_path, tiny_html, compressed):

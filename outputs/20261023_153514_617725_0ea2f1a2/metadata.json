@@ -1,0 +1,57 @@
+{
+  "id": "20261023_153514_617725_0ea2f1a2",
+  "parent_id": null,
+  "state": "needs_review",
+  "source": "클립보드 / 직접 입력",
+  "created_at": "2026-10-23T06:35:14.618000+00:00",
+  "elapsed_seconds": 78.8,
+  "attempt": 2,
+  "max_attempts": 6,
+  "key_number": 1,
+  "retry_at": null,
+  "scene_count": 5,
+  "body_char_count": 558,
+  "warnings": [],
+  "error": null,
+  "output_dir": "outputs/20261023_153514_617725_0ea2f1a2",
+  "events": [
+    {
+      "at": "2026-10-23T06:35:14.618438+00:00",
+      "message": "HTML을 장면별 평문으로 변환합니다."
+    },
+    {
+      "at": "2026-10-23T06:35:14.666128+00:00",
+      "message": "Gemini 3.8 Flash 응답 대기 · 1/6회 · 키 1"
+    },
+    {
+      "at": "2026-10-23T06:36:13.911138+00:00",
+      "message": "Gemini 3.8 Flash: Gemini 서비스 오류입니다 (HTTP 504). → Gemini 3.6 Flash로 전환합니다."
+    },
+    {
+      "at": "2026-10-23T06:36:13.920527+00:00",
+      "message": "Gemini 3.6 Flash 응답 대기 · 2/6회 · 키 1"
+    },
+    {
+      "at": "2026-10-23T06:36:33.363556+00:00",
+      "message": "5줄 대본, 문장 수, 분량, 최종 지수와 등락을 검증합니다."
+    },
+    {
+      "at": "2026-10-23T06:36:33.383216+00:00",
+      "message": "검토 필요: 안전하게 자동 수정할 수 없는 부분이 있어 대본과 표시된 사유를 확인하세요."
+    }
+  ],
+  "model": "gemini-3.6-flash",
+  "requested_model": "gemini-3.8-flash",
+  "attempted_models": [
+    "gemini-3.8-flash",
+    "gemini-3.6-flash"
+  ],
+  "validation_issues": [
+    "1장면에서 코스피 최종 종가 위치를 하나로 특정할 수 없습니다.",
+    "전체 대본은 490~550자여야 합니다. 현재 558자로 8자 초과합니다. 중복과 세부 정보를 줄이세요 (인사말·숫자·공백 포함, 개행 제외)."
+  ],
+  "excess_char_count": 8,
+  "revision": 0,
+  "edited_at": null,
+  "transcribe_numbers": true
+}

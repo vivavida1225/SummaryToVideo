@@ -28,7 +28,7 @@ class ModelInput(BaseModel):
     @classmethod
     def supported_model(cls, value):
         if value is not None:
-            model_candidates(value)
+            return model_candidates(value)[0]
         return value
 
 

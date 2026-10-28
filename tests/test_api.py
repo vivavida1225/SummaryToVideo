@@ -108,13 +108,13 @@ def test_session_catalog_and_job_model_validation(tmp_path):
         session = c.get('/api/session').json()
         assert session['model'] == 'gemini-3.8-flash'
         assert [m['id'] for m in session['models']] == [
-            'gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite']
+            'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite']
         headers = auth(c)
         rejected = c.post('/api/jobs', headers=headers, json={'html': 'invalid', 'model': 'unknown'})
         assert rejected.status_code == 422 and '모델' in rejected.json()['detail']
         chosen = c.post('/api/jobs', headers=headers, json={'html': 'invalid', 'model': 'gemini-3.7-flash'})
         assert chosen.status_code == 202
-        assert chosen.json()['requested_model'] == 'gemini-3.7-flash'
+        assert chosen.json()['requested_model'] == 'gemini-3.8-flash'
         c.portal.call(c.app.state.manager.wait, chosen.json()['id'])
         default = c.post('/api/jobs', headers=headers, json={'html': 'invalid'})
         assert default.json()['requested_model'] == 'gemini-3.8-flash'
@@ -182,7 +182,7 @@ def test_retry_model_and_original_source_reach_transport(tmp_path, tiny_html, co
         assert manager.get(retry['id'])['state'] == 'completed'
         legacy_retry = c.post(f"/api/jobs/{first['id']}/retry", headers=headers).json()
         c.portal.call(manager.wait, legacy_retry['id'])
-        assert calls[-1]['model'] == 'gemini-3.7-flash'
+        assert calls[-1]['model'] == 'gemini-3.8-flash'
 
 
 def test_clipboard_is_not_read_on_session_and_requires_token(tmp_path):
