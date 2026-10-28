@@ -34,7 +34,7 @@ def test_chisotda_and_conjugations_are_rejected(compressed, serialized, word):
     # Keep the fixture inside the character range while changing the target wording.
     lines = text.splitlines()
     deficit = max(0, 490 - sum(map(len, lines)))
-    lines[4] = lines[4].replace(' 오늘의 AI 시황이었습니다.', '가' * deficit + ' 오늘의 AI 시황이었습니다.')
+    lines[4] = '가' * deficit + lines[4]
     text = '\n'.join(lines)
 
     with pytest.raises(ValidationError) as caught:
@@ -54,7 +54,7 @@ def test_collects_both_markets_rates_direction_and_shape(compressed, serialized)
     bad += '\n추가 장면입니다.'
     with pytest.raises(ValidationError) as caught:
         validate_compressed(bad, serialized)
-    for expected in ('5줄', '종료 인사', '코스피 최종 지수', '코스닥 최종 지수', '코스닥 등락률', '코스닥 등락 방향'):
+    for expected in ('5줄', '코스피 최종 지수', '코스닥 최종 지수', '코스닥 등락률', '코스닥 등락 방향'):
         assert any(expected in issue for issue in caught.value.issues)
 
 
@@ -117,14 +117,14 @@ def test_thousands_separator_does_not_hide_direction(compressed, serialized):
     assert validate_compressed(good, source).text
 
 
-def test_body_label_after_greeting_is_rejected(compressed, serialized):
+def test_body_label_is_rejected(compressed, serialized):
     with pytest.raises(ValidationError):
         validate_compressed(compressed.replace('코스피는', '장면 1: 코스피는'), serialized)
 
 
 def test_repeated_market_intraday_quote_is_not_a_second_close(compressed, serialized):
     lines = compressed.splitlines()
-    lines[0] = ('오늘의 AI 시황입니다. 코스피는 7051.61로 보합 마감했고 코스닥은 0.67% 오른 835.97로 마감했습니다. '
+    lines[0] = ('코스피는 7051.61로 보합 마감했고 코스닥은 0.67% 오른 835.97로 마감하며 두 시장은 서로 다른 흐름을 나타냈습니다. '
                 '코스피는 장중 7112를 기록한 뒤 상승폭을 반납했습니다.')
     source = serialized.replace('· 요약', '· 장중 코스피 7112를 기록한 뒤 상승폭 반납')
     assert validate_compressed('\n'.join(lines), source).text
@@ -141,7 +141,7 @@ def test_negative_unsigned_percent_uses_change_direction(compressed, serialized)
         validate_compressed(compressed, source)
 
 
-@pytest.mark.parametrize('kind', ['four', 'six', 'blank', 'fence', 'marker', 'bullet', 'heading', 'label', 'greeting', 'outro', 'misplaced', 'duplicate', 'three', 'unterminated', 'empty_sentence'])
+@pytest.mark.parametrize('kind', ['four', 'six', 'blank', 'fence', 'marker', 'bullet', 'heading', 'label', 'three', 'unterminated', 'empty_sentence'])
 def test_invalid_narration_contract_rejected(compressed, serialized, kind):
     lines = compressed.splitlines()
     if kind == 'four': lines.pop(2)
@@ -152,10 +152,6 @@ def test_invalid_narration_contract_rejected(compressed, serialized, kind):
     elif kind == 'bullet': lines[2] = '· ' + lines[2]
     elif kind == 'heading': lines[2] = '**주도 업종** ' + lines[2]
     elif kind == 'label': lines[2] = '장면 3: ' + lines[2]
-    elif kind == 'greeting': lines[0] = lines[0].removeprefix('오늘의 AI 시황입니다. ')
-    elif kind == 'outro': lines[4] = lines[4].removesuffix(' 오늘의 AI 시황이었습니다.')
-    elif kind == 'misplaced': lines[1] = '오늘의 AI 시황입니다. ' + lines[1]
-    elif kind == 'duplicate': lines[0] = '오늘의 AI 시황입니다. ' + lines[0]
     elif kind == 'three': lines[1] += ' 추가 문장입니다.'
     elif kind == 'unterminated': lines[1] += ' 미완성 문장'
     elif kind == 'empty_sentence': lines[1] = ' .'
@@ -164,7 +160,7 @@ def test_invalid_narration_contract_rejected(compressed, serialized, kind):
 
 
 @pytest.mark.parametrize('size,allowed', [(489, False), (490, True), (500, True), (550, True), (551, False), (650, False)])
-def test_length_contract_counts_greetings_and_rejects_both_bounds(compressed, serialized, size, allowed):
+def test_length_contract_counts_all_text_and_rejects_both_bounds(compressed, serialized, size, allowed):
     lines = compressed.splitlines()
     lines[1:4] = ['정보가 부족합니다.'] * 3
     base = sum(map(len, lines))

@@ -114,7 +114,7 @@ def test_source_expression_guidance_reaches_generation_and_automatic_repair(
 def test_switches_models_without_waiting_on_429_and_server_error(tmp_path, serialized, compressed):
     result, transport, events, sleeps, _ = execute(tmp_path, serialized,
         [ProviderError('호출 한도', retryable=True, retry_after=9), ProviderError('서버 오류', retryable=True), compressed])
-    assert result.text.startswith('오늘의 AI 시황입니다.')
+    assert result.text == compressed
     assert [c['key'] for c in transport.calls] == ['secret-a'] * 3
     assert [c['model'] for c in transport.calls] == ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite']
     assert sleeps == []
@@ -201,7 +201,7 @@ def test_repair_reports_independent_violations_together(tmp_path, serialized, co
     bad = compressed.replace('835.97', '835.98').splitlines()[0] + '\n누락입니다.'
     _, transport, _, _, _ = execute(tmp_path, serialized, [bad, compressed])
     feedback = transport.calls[1]['feedback']
-    for expected in ('5줄', '종료 인사', '코스닥 최종 지수', '부족합니다'):
+    for expected in ('5줄', '코스닥 최종 지수', '부족합니다'):
         assert expected in feedback
 
 
@@ -248,6 +248,6 @@ def test_unresponsive_transport_times_out_and_switches_model(tmp_path, serialize
         pass
     runner = Compressor(prompt, [(1, 'a'), (2, 'b')], transport=transport, sleep=no_wait, request_timeout=0.02)
     result = asyncio.run(runner.run(serialized, lambda *a, **k: None, lambda *a: None))
-    assert result.text.startswith('오늘의 AI 시황입니다.')
+    assert result.text == compressed
     assert [c['key'] for c in transport.calls] == ['a', 'a']
     assert [c['model'] for c in transport.calls] == ['gemini-3.8-flash', 'gemini-3.6-flash']

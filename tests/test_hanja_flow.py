@@ -39,9 +39,9 @@ def test_hanja_stops_without_automatic_repair_and_keeps_raw(
 def test_hanja_rule_reaches_initial_generation_and_automatic_repair(
         tmp_path, serialized, compressed, transcribe_numbers):
     result, transport, _, _, _ = execute(
-        tmp_path, serialized, [compressed.replace('오늘의 AI 시황입니다.', '오늘의 시장 시황입니다.'), compressed],
+        tmp_path, serialized, [compressed.replace('0.67%', '0.68%'), compressed],
         transcribe_numbers=transcribe_numbers)
-    assert '오늘의 AI 시황입니다.' in result.text
+    assert result.text == (transcribe_numeric_tokens(compressed) if transcribe_numbers else compressed)
     assert len(transport.calls) == 2
     for instructions in (transport.calls[0]['prompt'], transport.calls[1]['prompt'],
                          transport.calls[1]['feedback']):

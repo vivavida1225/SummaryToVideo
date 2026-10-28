@@ -1,0 +1,47 @@
+{
+  "id": "20261028_164556_553642_b488cbb6",
+  "parent_id": "20261028_153652_402987_84f5bb21",
+  "state": "needs_review",
+  "source": "이전 직렬화 결과",
+  "created_at": "2026-10-28T07:45:56.553754+00:00",
+  "elapsed_seconds": 25.6,
+  "attempt": 1,
+  "max_attempts": 5,
+  "key_number": 1,
+  "retry_at": null,
+  "scene_count": 4,
+  "body_char_count": 553,
+  "warnings": [],
+  "error": null,
+  "output_dir": "outputs/20261028_164556_553642_b488cbb6",
+  "events": [
+    {
+      "at": "2026-10-28T07:45:56.554345+00:00",
+      "message": "보관된 직렬화 결과를 불러옵니다."
+    },
+    {
+      "at": "2026-10-28T07:45:56.567021+00:00",
+      "message": "Gemini 3.6 Flash 응답 대기 · 1/5회 · 키 1"
+    },
+    {
+      "at": "2026-10-28T07:46:22.103740+00:00",
+      "message": "5줄 대본, 문장 수, 분량, 최종 지수와 등락을 검증합니다."
+    },
+    {
+      "at": "2026-10-28T07:46:22.124241+00:00",
+      "message": "검토 필요: 안전하게 자동 수정할 수 없는 부분이 있어 대본과 표시된 사유를 확인하세요."
+    }
+  ],
+  "model": "gemini-3.6-flash",
+  "requested_model": "gemini-3.6-flash",
+  "attempted_models": [
+    "gemini-3.6-flash"
+  ],
+  "validation_issues": [
+    "전체 대본은 490~550자여야 합니다. 현재 553자로 3자 초과합니다. 중복과 세부 정보를 줄이세요 (숫자·공백·문장부호 포함, 개행 제외)."
+  ],
+  "excess_char_count": 3,
+  "revision": 0,
+  "edited_at": null,
+  "transcribe_numbers": true
+}

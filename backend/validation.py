@@ -13,8 +13,6 @@ from .transcribe_numbers import (NumberTranscriptionError, is_preserved_numeric_
                                  transcribe_numeric_tokens)
 
 
-INTRO = '오늘의 AI 시황입니다.'
-OUTRO = '오늘의 AI 시황이었습니다.'
 MIN_CHARS = 490
 MAX_CHARS = 550
 TARGET_CHARS = 500
@@ -394,24 +392,20 @@ def validate_compressed(response: str, serialized: str, *, transcribe_numbers: b
     lines = body.split('\n')
     if len(lines) != 5 or any(not line.strip() for line in lines):
         issues.append('빈 줄 없이 정확히 5줄인 일반 텍스트 대본이 필요합니다.')
-    if not lines[0].startswith(INTRO + ' ') or not lines[-1].endswith(' ' + OUTRO):
-        issues.append('첫 줄 시작 인사와 마지막 줄 종료 인사를 본문과 같은 줄에 표시하세요.')
-    if body.count(INTRO) != 1 or body.count(OUTRO) != 1:
-        issues.append('시작·종료 인사는 지정된 위치에 한 번씩만 허용됩니다.')
     if PROHIBITED_EXPRESSION.search(body):
         issues.append('대본 전체에서 금지 표현 “치솟다”와 그 활용형을 사용하지 마세요.')
     if not transcribe_numbers and _has_spoken_quantities_when_disabled(body, serialized):
         issues.append('수치 한국어 전사 모드가 꺼져 있습니다. 입력의 아라비아 숫자 표기와 단위를 유지하세요.')
-    if FORWARD_LOOKING_CLOSE.search(lines[-1].replace(OUTRO, '')):
+    if FORWARD_LOOKING_CLOSE.search(lines[-1]):
         issues.append('장면 5: 미래 전망이나 관전·확인 권고를 쓰지 말고, 원문의 미사용 보완 사실을 작성하세요.')
     for i, line in enumerate(lines, 1):
-        # Strip only fixed greetings; never count decimal dots as sentences.
-        content = line.replace(INTRO, '').replace(OUTRO, '').strip()
+        # Decimal dots are not sentence boundaries.
+        content = line.strip()
         if line != line.strip() or re.search(r'[<>`#*|\r\t]|={3,}|^\s*(?:[·•\-+]\s|\d+[.)]\s|장면\s*\d+\s*[:=])|\[[^\]]+\]', content):
             issues.append(f'장면 {i}: 번호·제목·Markdown 장식과 바깥쪽 공백을 제거하세요.')
         parts = SENTENCE_END.split(content)
         if not content.endswith('.') or parts[-1] != '' or not 1 <= len(parts) - 1 <= 2 or any(not p.strip() for p in parts[:-1]):
-            issues.append(f'장면 {i}: 인사말을 제외한 본문은 마침표로 끝나는 1~2문장이어야 합니다.')
+            issues.append(f'장면 {i}: 본문은 마침표로 끝나는 1~2문장이어야 합니다.')
         if re.search(r'[!?。！？]', content):
             issues.append(f'장면 {i}: 본문 문장은 마침표로 끝내세요.')
     if not numeric_review:
@@ -421,11 +415,11 @@ def validate_compressed(response: str, serialized: str, *, transcribe_numbers: b
     if chars < MIN_CHARS:
         issues.append(f'전체 대본은 {MIN_CHARS}~{MAX_CHARS}자여야 합니다. 현재 {chars}자로 '
                               f'{MIN_CHARS - chars}자 부족합니다. 원문의 근거와 시장 영향을 보충하세요 '
-                              '(인사말·숫자·공백 포함, 개행 제외).')
+                              '(숫자·공백·문장부호 포함, 개행 제외).')
     if chars > MAX_CHARS:
         issues.append(f'전체 대본은 {MIN_CHARS}~{MAX_CHARS}자여야 합니다. 현재 {chars}자로 '
                               f'{chars - MAX_CHARS}자 초과합니다. 중복과 세부 정보를 줄이세요 '
-                              '(인사말·숫자·공백 포함, 개행 제외).')
+                              '(숫자·공백·문장부호 포함, 개행 제외).')
     if issues:
         raise ValidationError(issues, body_char_count=chars, text=body,
                               requires_review=bool(strength_issues or hanja_issues) or numeric_review)

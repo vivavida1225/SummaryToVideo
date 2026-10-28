@@ -6,7 +6,7 @@ Plan approved in conversation. Worktree inapplicable: directory is not a Git rep
 | --- | --- | --- |
 | Backend / frontend | HTTP contract in implementation.md | Fixed before implementation |
 | Backend / launcher | server CLI + health/session/shutdown + .runtime/server.json | Fixed before implementation |
-| Serializer / compressor | serialized scene input → five-line narration | Per-market index/rate checks and greeting-aware sentence limits |
+| Serializer / compressor | serialized scene input → five-line narration | Per-market index/rate checks and per-line sentence limits |
 
 - Backend: complete; 111 tests across serializer, narration validation, retries, SDK boundary, storage/clipboard, jobs and API. Expanded direction vocabulary, strict 490..550 characters and conversational repair feedback are verified; old archives remain readable.
 - Frontend: complete; 12 tests, typecheck/build and actual Edge browser checks pass. Five-line narration display and newline-excluded character counts verified.
