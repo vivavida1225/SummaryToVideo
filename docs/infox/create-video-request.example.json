@@ -1,0 +1,53 @@
+{
+  "video": {
+    "title": "<날짜별 영상 제목>",
+    "description": "<영상 설명>",
+    "template_id": 1786
+  },
+  "context": {
+    "type": "text",
+    "data": {
+      "disableAI": true,
+      "inputText": "<장면 1 최종 대본>\n<장면 2 최종 대본>\n<장면 3 최종 대본>\n<장면 4 최종 대본>\n<장면 5 최종 대본>",
+      "stage1_model": {
+        "title": "",
+        "summary": "",
+        "scenes": [
+          {
+            "voiceover": "<장면 1 최종 대본>",
+            "context": "<장면 1 최종 대본>"
+          },
+          {
+            "voiceover": "<장면 2 최종 대본>",
+            "context": "<장면 2 최종 대본>"
+          },
+          {
+            "voiceover": "<장면 3 최종 대본>",
+            "context": "<장면 3 최종 대본>"
+          },
+          {
+            "voiceover": "<장면 4 최종 대본>",
+            "context": "<장면 4 최종 대본>"
+          },
+          {
+            "voiceover": "<장면 5 최종 대본>",
+            "context": "<장면 5 최종 대본>"
+          }
+        ]
+      }
+    },
+    "user_prompt": "",
+    "target_duration": 60,
+    "useUserAsset": [],
+    "voice_id": "e9d18b28-937c-42ae-8fe0-de92517c233f",
+    "voice_speed": "1.0",
+    "voice_provider": "elevenlabs",
+    "prompt_template_id": null,
+    "asset_mode": "ai_recommend",
+    "video_matching": true,
+    "ai_image_style": "photo",
+    "ai_image_aspect_ratio": "4:3",
+    "lang": "ko",
+    "script_version": "v1"
+  }
+}
