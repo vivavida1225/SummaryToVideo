@@ -146,7 +146,10 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
     @app.get('/api/session')
     async def session():
         return {'token': token, 'model': settings.model, 'models': MODELS,
-                'configured_keys': [number for number, _ in settings.keys()]}
+                'configured_keys': [number for number, _ in settings.keys()],
+                'configured_keys_by_provider': {
+                    provider: [number for number, _ in settings.keys(provider)]
+                    for provider in ('gemini', 'openai')}}
 
     @app.get('/api/files')
     async def files():

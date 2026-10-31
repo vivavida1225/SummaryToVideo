@@ -4,21 +4,13 @@ import json
 import ssl
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from typing import Literal
 
 import httpx
 import truststore
 from google import genai
 from google.genai import errors, types
 
-
-class ProviderError(Exception):
-    def __init__(self, message: str, *, action: Literal['next_model', 'next_key', 'stop'] | None = None,
-                 retryable: bool = False, retry_after: float | None = None):
-        super().__init__(message)
-        self.action = action or ('next_model' if retryable else 'stop')
-        self.retryable = self.action != 'stop'
-        self.retry_after = retry_after
+from .providers import ProviderError
 
 
 def _retry_after(exc: errors.APIError) -> float | None:

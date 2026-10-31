@@ -66,7 +66,7 @@ def test_hanja_in_automatic_repair_response_stops_with_review(tmp_path, serializ
 def test_hanja_job_persistence_manual_copy_and_explicit_retry(
         tmp_path, serialized, compressed, retry_hanja, transcribe_numbers):
     async def scenario():
-        settings = Settings(tmp_path)
+        settings = Settings(tmp_path, model='gemini-3.8-flash')
         settings.prompt_path.parent.mkdir(parents=True)
         settings.prompt_path.write_text(
             (ROOT / 'prompts/compress_to_1min.txt').read_text(encoding='utf-8'), encoding='utf-8')

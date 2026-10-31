@@ -5,11 +5,15 @@ import App from './App.vue'
 import type { Job } from './types'
 
 const session = {
-  token: 'session-token', model: 'gemini-3.8-flash', configured_keys: [1, 3],
+  token: 'session-token', model: 'gpt-6.1-sol', configured_keys: [1, 3],
+  configured_keys_by_provider: { gemini: [1, 3], openai: [1] },
   models: [
-    { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
-    { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash' },
-    { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite' },
+    { id: 'gpt-6.1-sol', label: 'GPT 6.1 Sol', provider: 'openai' },
+    { id: 'gpt-6.1-terra', label: 'GPT 6.1 Terra', provider: 'openai' },
+    { id: 'gpt-6-luna', label: 'GPT 6 Luna', provider: 'openai' },
+    { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash', provider: 'gemini' },
+    { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash', provider: 'gemini' },
+    { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite', provider: 'gemini' },
   ],
 }
 
@@ -70,6 +74,41 @@ async function finishBootstrap() {
 }
 
 describe('App', () => {
+  it('선택한 공급자의 키 상태를 표시한다', async () => {
+    installBootstrapFetch(() => jsonResponse({}, 404))
+    render(App)
+    await finishBootstrap()
+    expect(screen.getByText('OpenAI 키 1')).toBeInTheDocument()
+    const select = screen.getByRole('combobox', { name: '시작 모델' })
+    await fireEvent.update(select, 'gemini-3.6-flash')
+    expect(screen.getByText('Gemini 키 1 · 3')).toBeInTheDocument()
+    await fireEvent.update(select, 'gpt-6-luna')
+    expect(screen.getByText('OpenAI 키 1')).toBeInTheDocument()
+  })
+
+  it('OpenAI 키가 없으면 Gemini 키를 표시하지 않는다', async () => {
+    const fetchMock = installBootstrapFetch(() => jsonResponse({}, 404))
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const path = requestPath(input)
+      if (path === '/api/session') return jsonResponse({ ...session,
+        configured_keys_by_provider: { gemini: [1, 3], openai: [] } })
+      if (path === '/api/files') return jsonResponse({ files: [] })
+      return jsonResponse({ text: '<article>원문</article>', format: 'html' })
+    })
+    render(App)
+    await finishBootstrap()
+    expect(screen.getByText('OpenAI 키 없음')).toBeInTheDocument()
+    expect(screen.queryByText('Gemini 키 1 · 3')).not.toBeInTheDocument()
+  })
+
+  it('GPT 요청 중에는 공급자 중립 진행 제목을 표시한다', async () => {
+    sessionStorage.setItem('market-compressor.job-id', 'job-1')
+    installBootstrapFetch(() => jsonResponse(makeJob({ state: 'requesting', model: 'gpt-6.1-sol' })))
+    render(App)
+    expect(await screen.findByRole('heading', { name: '모델 응답을 기다리는 중' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '시작 모델' })).toBeDisabled()
+  })
+
   it('수치 전사 옵션은 기본으로 꺼져 있고 저장한 선택을 일반 변환 요청에 보낸다', async () => {
     const fetchMock = installBootstrapFetch(path => path === '/api/jobs'
       ? jsonResponse(makeJob(), 202) : jsonResponse({}, 404))
@@ -85,7 +124,7 @@ describe('App', () => {
     await waitFor(() => expect(fetchMock.mock.calls.some(([request]) => requestPath(request) === '/api/jobs')).toBe(true))
     const call = fetchMock.mock.calls.find(([request]) => requestPath(request) === '/api/jobs')
     expect(JSON.parse(String(call?.[1]?.body))).toEqual({
-      html: '<article>오늘의 시장</article>', model: 'gemini-3.8-flash', transcribe_numbers: true,
+      html: '<article>오늘의 시장</article>', model: 'gpt-6.1-sol', transcribe_numbers: true,
     })
   })
 
@@ -479,8 +518,9 @@ describe('App', () => {
     render(App)
     await finishBootstrap()
     const select = screen.getByRole('combobox', { name: '시작 모델' })
-    expect(select).toHaveValue('gemini-3.8-flash')
+    expect(select).toHaveValue('gpt-6.1-sol')
     expect(Array.from((select as HTMLSelectElement).options).map(option => option.value)).toEqual([
+      'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-luna',
       'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite',
     ])
     await fireEvent.update(select, 'gemini-3.6-flash')
@@ -494,8 +534,8 @@ describe('App', () => {
   })
 
   it.each([
-    ['gemini-3.6-flash', 'gemini-3.6-flash'], ['removed-model', 'gemini-3.8-flash'],
-    ['gemini-3.7-flash', 'gemini-3.8-flash'],
+    ['gemini-3.6-flash', 'gemini-3.6-flash'], ['removed-model', 'gpt-6.1-sol'],
+    ['gemini-3.7-flash', 'gpt-6.1-sol'], ['gpt-6.1-terra', 'gpt-6.1-terra'],
   ])('저장된 모델 %s를 복원한다', async (saved, expected) => {
     localStorage.setItem('market-compressor.model', saved)
     installBootstrapFetch(() => jsonResponse({}, 404))
@@ -519,10 +559,10 @@ describe('App', () => {
 
   it('폴백된 실제 모델을 표시하면서 시작 모델은 유지한다', async () => {
     sessionStorage.setItem('market-compressor.job-id', 'job-1')
-    installBootstrapFetch(() => jsonResponse(makeJob({ state: 'completed', model: 'gemini-3.6-flash', requested_model: 'gemini-3.8-flash' })))
+    installBootstrapFetch(() => jsonResponse(makeJob({ state: 'completed', model: 'gpt-6.1-terra', requested_model: 'gpt-6.1-sol' })))
     render(App)
-    expect(await screen.findByText('응답 모델: Gemini 3.6 Flash')).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: '시작 모델' })).toHaveValue('gemini-3.8-flash')
+    expect(await screen.findByText('응답 모델: GPT 6.1 Terra')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '시작 모델' })).toHaveValue('gpt-6.1-sol')
   })
 
   it('파일 목록 오류가 나도 클립보드 기본 입력은 불러온다', async () => {
@@ -608,7 +648,7 @@ describe('App', () => {
       const call = fetchMock.mock.calls.find(([request]) => requestPath(request) === '/api/jobs')
       expect(call).toBeDefined()
       expect(JSON.parse(String(call?.[1]?.body))).toEqual({
-        file_path: '오늘 시장.html', model: 'gemini-3.8-flash', transcribe_numbers: false,
+        file_path: '오늘 시장.html', model: 'gpt-6.1-sol', transcribe_numbers: false,
       })
       expect(new Headers(call?.[1]?.headers).get('X-App-Token')).toBe('session-token')
     })
@@ -665,7 +705,7 @@ describe('App', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: buttonName }))
 
-    expect(await screen.findByText('Gemini 응답을 기다리는 중')).toBeInTheDocument()
+    expect(await screen.findByText('모델 응답을 기다리는 중')).toBeInTheDocument()
     expect(screen.getByRole('alert')).toHaveTextContent('이미 진행 중인 작업을 이어서 표시합니다.')
     expect(sessionStorage.getItem('market-compressor.job-id')).toBe('server-active')
   })
@@ -753,7 +793,7 @@ describe('App', () => {
 
     render(App)
 
-    expect(await screen.findByText('Gemini 응답을 기다리는 중')).toBeInTheDocument()
+    expect(await screen.findByText('모델 응답을 기다리는 중')).toBeInTheDocument()
     expect(screen.getByText('시도 2 / 3')).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '직렬화 원문' })).toHaveValue('복원한 직렬화')
     expect(fetchMock.mock.calls.some(([request]) => requestPath(request) === '/api/clipboard/read')).toBe(false)

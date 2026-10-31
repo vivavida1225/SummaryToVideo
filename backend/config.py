@@ -1,3 +1,4 @@
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,8 +21,11 @@ class Settings:
     def prompt_path(self) -> Path:
         return self.root / 'prompts/compress_to_1min.txt'
 
-    def keys(self) -> list[tuple[int, str]]:
+    def keys(self, provider: str = 'gemini') -> list[tuple[int, str]]:
         values = dotenv_values(self.root / '.env', encoding='utf-8-sig')
+        if provider == 'openai':
+            value = os.environ.get('OPENAI_API_KEY', '').strip() or (values.get('OPENAI_API_KEY') or '').strip()
+            return [(1, value)] if value else []
         pairs = []
         for name, value in values.items():
             match = re.fullmatch(r'GEMINI_API_KEY_([1-9]\d*)', name)
@@ -30,6 +34,11 @@ class Settings:
         return sorted(pairs)
 
     def redact(self, message: str) -> str:
-        for _, value in self.keys():
+        values = dotenv_values(self.root / '.env', encoding='utf-8-sig')
+        secrets = [value for provider in ('gemini', 'openai') for _, value in self.keys(provider)]
+        file_key = (values.get('OPENAI_API_KEY') or '').strip()
+        if file_key:
+            secrets.append(file_key)
+        for value in sorted(set(secrets), key=len, reverse=True):
             message = message.replace(value, '[API KEY]')
         return message

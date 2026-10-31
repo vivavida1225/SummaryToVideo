@@ -94,7 +94,7 @@ def test_myasset_html_reaches_existing_job_pipeline(tmp_path, tiny_html, compres
         imported = c.post('/api/sources/myasset', headers=headers, json={'base_date': '2026-09-17', 'gubun': 1})
         assert imported.status_code == 200
         assert not c.app.state.manager.jobs
-        created = c.post('/api/jobs', headers=headers, json={'html': imported.json()['html']})
+        created = c.post('/api/jobs', headers=headers, json={'html': imported.json()['html'], 'model': 'gemini-3.8-flash'})
         assert created.status_code == 202
         c.portal.call(c.app.state.manager.wait, created.json()['id'])
         job = c.get('/api/jobs/' + created.json()['id'], headers=headers).json()
@@ -106,9 +106,9 @@ def test_myasset_html_reaches_existing_job_pipeline(tmp_path, tiny_html, compres
 def test_session_catalog_and_job_model_validation(tmp_path):
     with client(tmp_path) as c:
         session = c.get('/api/session').json()
-        assert session['model'] == 'gemini-3.8-flash'
+        assert session['model'] == 'gpt-6.1-sol'
         assert [m['id'] for m in session['models']] == [
-            'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite']
+            'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-luna', 'gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite']
         headers = auth(c)
         rejected = c.post('/api/jobs', headers=headers, json={'html': 'invalid', 'model': 'unknown'})
         assert rejected.status_code == 422 and '모델' in rejected.json()['detail']
@@ -117,7 +117,7 @@ def test_session_catalog_and_job_model_validation(tmp_path):
         assert chosen.json()['requested_model'] == 'gemini-3.8-flash'
         c.portal.call(c.app.state.manager.wait, chosen.json()['id'])
         default = c.post('/api/jobs', headers=headers, json={'html': 'invalid'})
-        assert default.json()['requested_model'] == 'gemini-3.8-flash'
+        assert default.json()['requested_model'] == 'gpt-6.1-sol'
 
 
 def test_transcription_option_defaults_off_is_stored_and_reused_for_retry(tmp_path, tiny_html):

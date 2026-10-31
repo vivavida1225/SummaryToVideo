@@ -4,8 +4,10 @@ import asyncio
 import time
 from pathlib import Path
 
-from .gemini import GeminiTransport, ProviderError
-from .models import MODEL, model_candidates, model_label
+from .gemini import GeminiTransport
+from .openai import OpenAITransport
+from .providers import ProviderError
+from .models import MODEL, model_candidates, model_label, model_provider
 from .narration import decode_response, validate_response
 from .validation import (MIN_CHARS, MAX_CHARS, TARGET_CHARS, ValidatedText, ValidationError,
                          count_characters, index_triples, validate_compressed)
@@ -178,7 +180,8 @@ class Compressor:
         self.prompt_path, self.keys, self.model = prompt_path, keys, model
         self.models = model_candidates(model)
         self.max_attempts = len(self.models) + len(keys)
-        self.transport = transport or GeminiTransport()
+        self.provider = model_provider(self.models[0])
+        self.transport = transport or (OpenAITransport() if self.provider == 'openai' else GeminiTransport())
         self.sleep, self.clock = sleep, clock
         self.request_timeout, self.total_timeout = request_timeout, total_timeout
         self.transcribe_numbers = transcribe_numbers
@@ -193,7 +196,8 @@ class Compressor:
     async def run(self, serialized: str, emit, save_invalid, save_raw=None, *,
                   previous_response: str = '', validation_issues: list[str] | None = None) -> ValidatedText:
         if not self.keys:
-            raise CompressionError('.env에 GEMINI_API_KEY_1 등 API 키를 설정하세요.')
+            key_name = 'OPENAI_API_KEY' if self.provider == 'openai' else 'GEMINI_API_KEY_1 등 API 키'
+            raise CompressionError(f'.env에 {key_name}를 설정하세요.')
         index_triples(serialized)  # Fail locally before spending any API calls.
         start, key_index, model_index, repairs = self.clock(), 0, 0, int(bool(previous_response))
         max_attempts = self.max_attempts - repairs
@@ -225,7 +229,7 @@ class Compressor:
                         timeout=min(self.request_timeout, remaining),
                     )
                 if not raw or not raw.strip():
-                    raise ProviderError('Gemini가 빈 응답을 반환했습니다.', retryable=True)
+                    raise ProviderError('모델이 빈 응답을 반환했습니다.', retryable=True)
                 if save_raw is not None:
                     save_raw(attempt, raw)
                 emit('validating', message='5줄 대본, 문장 수, 분량, 최종 지수와 등락을 검증합니다.')
@@ -242,7 +246,7 @@ class Compressor:
                     emit('validating', message=f'형식 보정 요청을 준비합니다: {exc}')
                     continue
             except TimeoutError:
-                failure = ProviderError('제한 시간 내 Gemini 응답이 없습니다.', retryable=True)
+                failure = ProviderError('제한 시간 내 모델 응답이 없습니다.', retryable=True)
             except ProviderError as exc:
                 failure = exc
             if failure.action == 'stop':

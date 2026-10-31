@@ -316,17 +316,23 @@ function Ensure-PythonEnvironment {
     $configPath = Join-Path $venvDir 'pyvenv.cfg'
     $expectedHome = [System.IO.Path]::GetFullPath((Join-Path $script:Root '.tools/python/tools'))
     $homeMatches = $false
+    $versionMatches = $false
     if (Test-Path -LiteralPath $configPath -PathType Leaf) {
-        $homeLine = Get-Content -LiteralPath $configPath -Encoding UTF8 | Where-Object { $_ -match '^home\s*=' } | Select-Object -First 1
+        $configLines = Get-Content -LiteralPath $configPath -Encoding UTF8
+        $versionLine = $configLines | Where-Object { $_ -match '^version\s*=' } | Select-Object -First 1
+        if ($versionLine) {
+            $versionMatches = ($versionLine -replace '^version\s*=\s*', '').Trim() -eq $script:PythonVersion
+        }
+        $homeLine = $configLines | Where-Object { $_ -match '^home\s*=' } | Select-Object -First 1
         if ($homeLine) {
             $configuredHome = [System.IO.Path]::GetFullPath(($homeLine -replace '^home\s*=\s*', ''))
             $homeMatches = $configuredHome.Equals($expectedHome, [StringComparison]::OrdinalIgnoreCase)
         }
     }
     $venvRuns = $false
-    if ($homeMatches -and (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
+    if ($homeMatches -and $versionMatches -and (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
         try {
-            & $venvPython -c 'import sys; raise SystemExit(0 if sys.prefix != sys.base_prefix else 1)' 2>$null
+            & $venvPython -c 'import platform, sys; raise SystemExit(0 if sys.prefix != sys.base_prefix and platform.python_version() == sys.argv[1] else 1)' $script:PythonVersion 2>$null
             $venvRuns = ($LASTEXITCODE -eq 0)
         }
         catch {
@@ -335,13 +341,8 @@ function Ensure-PythonEnvironment {
     }
     $venvChanged = $false
     if (-not $venvRuns) {
-        Write-LauncherLog '프로젝트 가상 환경을 생성하거나 현재 경로에 맞게 복구합니다.'
-        try {
-            Invoke-LoggedCommand $basePython @('-m', 'venv', '--upgrade', $venvDir) $script:Root 'Python 가상 환경 복구'
-        }
-        catch {
-            Invoke-LoggedCommand $basePython @('-m', 'venv', '--clear', $venvDir) $script:Root 'Python 가상 환경 재생성'
-        }
+        Write-LauncherLog '프로젝트 가상 환경의 Python 버전·경로·실행 상태가 맞지 않아 새로 생성합니다.'
+        Invoke-LoggedCommand $basePython @('-m', 'venv', '--clear', $venvDir) $script:Root 'Python 가상 환경 재생성'
         $venvChanged = $true
     }
     if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {

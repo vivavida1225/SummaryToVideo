@@ -24,7 +24,7 @@ def manager_for(tmp_path, answers):
     prompt = tmp_path / 'prompt.txt'
     prompt.write_text('instructions', encoding='utf-8')
     transport, clipboard = Transport(answers), Clipboard()
-    manager = JobManager(Settings(tmp_path), clipboard=clipboard,
+    manager = JobManager(Settings(tmp_path, model='gemini-3.8-flash'), clipboard=clipboard,
         compressor_factory=lambda **options: Compressor(prompt, transport=transport, **options))
     return manager, transport, clipboard
 
@@ -118,7 +118,7 @@ def test_review_retry_api_restores_context_after_restart(tmp_path, tiny_html, co
     (tmp_path / 'prompts').mkdir()
     (tmp_path / 'prompts/compress_to_1min.txt').write_text('instructions', encoding='utf-8')
     with client(tmp_path) as c:
-        first = c.post('/api/jobs', headers=auth(c), json={'html': tiny_html}).json()
+        first = c.post('/api/jobs', headers=auth(c), json={'html': tiny_html, 'model': 'gemini-3.8-flash'}).json()
         c.portal.call(c.app.state.manager.wait, first['id'])
         assert c.get(f"/api/jobs/{first['id']}", headers=auth(c)).json()['state'] == 'needs_review'
     with client(tmp_path) as c:

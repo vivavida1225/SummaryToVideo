@@ -14,7 +14,7 @@ def runner(tmp_path, answers, **kwargs):
     prompt = tmp_path / 'prompt.txt'
     prompt.write_text('instructions', encoding='utf-8')
     transport = Transport(answers)
-    compressor = Compressor(prompt, kwargs.pop('keys', [(1, 'a')]), transport=transport, **kwargs)
+    compressor = Compressor(prompt, kwargs.pop('keys', [(1, 'a')]), transport=transport, model=kwargs.pop('model', MODELS[0]), **kwargs)
     return compressor, transport
 
 

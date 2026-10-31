@@ -49,9 +49,11 @@ export interface SessionInfo {
   model: string
   models: ModelOption[]
   configured_keys: number[]
+  configured_keys_by_provider: Record<'gemini' | 'openai', number[]>
 }
 
 export interface ModelOption {
+  provider: 'gemini' | 'openai'
   id: string
   label: string
 }

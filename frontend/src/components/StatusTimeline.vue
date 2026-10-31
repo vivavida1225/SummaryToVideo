@@ -9,7 +9,7 @@ const stateLabel: Record<JobState, string> = {
   queued: '작업을 준비하는 중',
   serializing: '원문을 정돈하는 중',
   copying_serialized: '직렬화 원문을 복사하는 중',
-  requesting: 'Gemini 응답을 기다리는 중',
+  requesting: '모델 응답을 기다리는 중',
   retry_wait: '다음 요청을 준비하는 중',
   validating: '결과 형식을 확인하는 중',
   copying_compressed: '압축 결과를 복사하는 중',

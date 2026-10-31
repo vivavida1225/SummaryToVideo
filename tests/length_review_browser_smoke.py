@@ -33,7 +33,8 @@ def main():
         requests.append(path)
         if path == 'session':
             data = dict(token='test', model='gemini-3.8-flash', configured_keys=[1],
-                        models=[dict(id='gemini-3.8-flash', label='Gemini 3.8 Flash')])
+                        configured_keys_by_provider={'gemini': [1], 'openai': []},
+                        models=[dict(id='gemini-3.8-flash', label='Gemini 3.8 Flash', provider='gemini')])
         elif path == 'files':
             data = {'files': []}
         elif path == 'jobs/review':

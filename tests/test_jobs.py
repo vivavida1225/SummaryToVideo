@@ -34,7 +34,7 @@ class Compressor:
 
 
 def setup(tmp_path, response, clipboard=None):
-    settings = Settings(tmp_path)
+    settings = Settings(tmp_path, model='gemini-3.8-flash')
     (tmp_path / 'src').mkdir()
     clipboard = clipboard or Clipboard()
     compressor = Compressor(response, clipboard)
@@ -109,7 +109,7 @@ def test_transcribed_job_keeps_model_response_and_corrected_script_separate(tmp_
     from tests.test_compression import Transport
 
     async def scenario():
-        settings = Settings(tmp_path)
+        settings = Settings(tmp_path, model='gemini-3.8-flash')
         settings.prompt_path.parent.mkdir(parents=True, exist_ok=True)
         settings.prompt_path.write_text('instructions', encoding='utf-8')
         (tmp_path / '.env').write_text('GEMINI_API_KEY_1=fake', encoding='utf-8')

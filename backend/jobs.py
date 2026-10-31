@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from .clipboard import WindowsClipboard
 from .compression import CompressionError, Compressor, ResponseValidationError
 from .config import MAX_INPUT_BYTES, Settings
-from .models import model_candidates
+from .models import model_candidates, model_provider
 from .narration import decode_response
 from .serializer import serialize_html
 from .storage import ResultStore, read_source
@@ -44,7 +44,7 @@ class JobManager:
         model = model if model is not None else self.settings.model
         candidates = model_candidates(model)
         model = candidates[0]
-        keys = list(self.settings.keys())
+        keys = list(self.settings.keys(model_provider(model)))
         job_id = datetime.now().strftime('%Y%m%d_%H%M%S_%f_') + uuid.uuid4().hex[:8]
         job = dict(id=job_id, parent_id=parent_id, state='queued', source=file_path or ('이전 직렬화 결과' if parent_id else '클립보드 / 직접 입력'),
                    created_at=now(), elapsed_seconds=0, attempt=0,

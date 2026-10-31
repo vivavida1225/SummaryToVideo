@@ -13,6 +13,12 @@ const TERMINAL_STATES = new Set(['completed', 'failed', 'needs_review'])
 
 const session = ref<SessionInfo | null>(null)
 const selectedModel = ref('')
+const selectedProvider = computed(() => session.value?.models.find(model => model.id === selectedModel.value)?.provider)
+const configuredKeys = computed(() => {
+  const provider = selectedProvider.value
+  return provider ? session.value?.configured_keys_by_provider[provider] ?? [] : []
+})
+const providerLabel = computed(() => selectedProvider.value === 'openai' ? 'OpenAI' : 'Gemini')
 const transcribeNumbers = ref(false)
 const files = ref<SourceFile[]>([])
 const sourceMode = ref<'clipboard' | 'file'>('clipboard')
@@ -437,7 +443,7 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
           :disabled="loading || actionBusy || isRunning" @change="rememberModel">
           <option v-for="model in session.models" :key="model.id" :value="model.id">{{ model.label }}</option>
         </select>
-        <span class="keys">키 {{ session.configured_keys.join(' · ') || '없음' }}</span>
+        <span class="keys">{{ providerLabel }} 키 {{ configuredKeys.join(' · ') || '없음' }}</span>
       </div>
     </header>
 

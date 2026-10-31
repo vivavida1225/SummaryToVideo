@@ -26,7 +26,8 @@ def main():
         path = route.request.url.split('/api/')[1]
         if path == 'session':
             data = dict(token='test', model='gemini-3.8-flash', configured_keys=[1],
-                        models=[dict(id='gemini-3.8-flash', label='Gemini 3.8 Flash')])
+                        configured_keys_by_provider={'gemini': [1], 'openai': []},
+                        models=[dict(id='gemini-3.8-flash', label='Gemini 3.8 Flash', provider='gemini')])
         elif path == 'files':
             data = {'files': []}
         elif path == 'clipboard/read':
@@ -76,7 +77,7 @@ def main():
             button.click()
             expect(page.get_by_label('클립보드 HTML 원문', exact=True)).to_have_value(html)
             expect(page.get_by_role('textbox', name='압축 결과', exact=True)).to_have_value('완료된 대본')
-            assert submissions == [{'html': html, 'model': 'gemini-3.8-flash'}]
+            assert submissions == [{'html': html, 'model': 'gemini-3.8-flash', 'transcribe_numbers': False}]
             assert imports[-1] == {'base_date': '2026-09-17', 'gubun': 1}
             page.reload(wait_until='networkidle')
             settings.click()

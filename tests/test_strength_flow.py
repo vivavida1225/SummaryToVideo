@@ -74,7 +74,7 @@ def test_strength_candidate_stops_after_one_call_and_preserves_raw(
 def test_review_persistence_and_explicit_retry_use_original_source(
         tmp_path, serialized, strength_draft, transcribe_numbers):
     async def scenario():
-        settings = Settings(tmp_path)
+        settings = Settings(tmp_path, model='gemini-3.8-flash')
         settings.prompt_path.parent.mkdir(parents=True)
         settings.prompt_path.write_text(
             (ROOT / 'prompts/compress_to_1min.txt').read_text(encoding='utf-8'), encoding='utf-8')

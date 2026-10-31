@@ -72,7 +72,7 @@ def execute(tmp_path, serialized, answers, keys=None, **options):
         sleeps.append(seconds)
 
     runner = Compressor(prompt, keys or [(1, 'secret-a'), (2, 'secret-b'), (3, 'secret-c')],
-                        transport=transport, sleep=sleep, **options)
+                        transport=transport, sleep=sleep, model=options.pop('model', 'gemini-3.8-flash'), **options)
     result = asyncio.run(runner.run(serialized, lambda state, **fields: events.append((state, fields)),
                                     lambda attempt, raw: invalid.append(raw)))
     return result, transport, events, sleeps, invalid
@@ -223,7 +223,7 @@ def test_non_retryable_request_error_stops_first_attempt(tmp_path, serialized):
 
 
 def test_no_configured_key_is_actionable(tmp_path, serialized):
-    runner = Compressor(tmp_path / 'prompt.txt', [])
+    runner = Compressor(tmp_path / 'prompt.txt', [], model='gemini-3.8-flash')
     with pytest.raises(CompressionError, match='GEMINI_API_KEY'):
         asyncio.run(runner.run(serialized, lambda *a, **k: None, lambda *a: None))
 
@@ -246,7 +246,7 @@ def test_unresponsive_transport_times_out_and_switches_model(tmp_path, serialize
     transport = SlowTransport([compressed])
     async def no_wait(_):
         pass
-    runner = Compressor(prompt, [(1, 'a'), (2, 'b')], transport=transport, sleep=no_wait, request_timeout=0.02)
+    runner = Compressor(prompt, [(1, 'a'), (2, 'b')], transport=transport, sleep=no_wait, request_timeout=0.02, model='gemini-3.8-flash')
     result = asyncio.run(runner.run(serialized, lambda *a, **k: None, lambda *a: None))
     assert result.text == compressed
     assert [c['key'] for c in transport.calls] == ['a', 'a']
