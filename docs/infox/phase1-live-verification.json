@@ -1,0 +1,51 @@
+{
+  "ok": true,
+  "verified_at_kst": "2026-11-02T10:45:46.029553+09:00",
+  "checks": {
+    "authenticate": "ok",
+    "video_state": {
+      "id_type": "str",
+      "video_type": "dict",
+      "script_type": "dict",
+      "can_edit_type": "bool",
+      "updated_at_type": "str"
+    },
+    "refresh": "ok",
+    "video_state_after_refresh": {
+      "id_type": "str",
+      "video_type": "dict",
+      "script_type": "dict",
+      "can_edit_type": "bool",
+      "updated_at_type": "str"
+    },
+    "favorites": {
+      "video": {
+        "total": 12,
+        "received": 12,
+        "skip": 0,
+        "limit": 50,
+        "favorites_only": true,
+        "more_pages": false
+      },
+      "uservideo": {
+        "total": 0,
+        "received": 0,
+        "skip": 0,
+        "limit": 50,
+        "favorites_only": true,
+        "more_pages": false
+      }
+    },
+    "sse": {
+      "body_received": true,
+      "json_type": "dict",
+      "connection_confirmed": true,
+      "known_fields": [
+        "type",
+        "status",
+        "channel",
+        "id"
+      ]
+    }
+  }
+}

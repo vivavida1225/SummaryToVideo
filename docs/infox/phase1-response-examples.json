@@ -1,0 +1,53 @@
+{
+  "provenance": {
+    "date_kst": "2026-11-02",
+    "source": "Independent InfoX HTTP client using a user-configured existing video",
+    "scope": "Selected response fields only; nested video/script data and account data omitted. Search shows one of 12 items for documentation, not a complete page.",
+    "redaction": "Credentials, video/item/connection identifiers, timestamps, titles and all file or signed URLs replaced with placeholders. Numeric segment values below are illustrative, preserving observed types.",
+    "not_observed": "Generation task completion/failure event bodies. Those require the single generation run in phase 3."
+  },
+  "login_or_refresh": {
+    "access_token": "<REDACTED>",
+    "token_type": "bearer"
+  },
+  "videostate_excerpt": {
+    "id": "<VIDEO_ID>",
+    "video": {},
+    "script": {},
+    "can_edit": true,
+    "updated_at": "<VERSION_TIMESTAMP>"
+  },
+  "video_favorites_excerpt": {
+    "total": 12,
+    "skip": 0,
+    "limit": 50,
+    "items": [
+      {
+        "id": "<SEGMENT_ID>",
+        "videoId": "<SOURCE_VIDEO_ID>",
+        "frameIndex": 1,
+        "timestamp": 6.0,
+        "duration": 6.0,
+        "title": "<TITLE>",
+        "is_favorite": true,
+        "segment": "<SEGMENT_FILE>",
+        "preview_presigned": "<REDACTED_URL>",
+        "segment_url_presigned": "<REDACTED_URL>",
+        "thumbnail": "<REDACTED_URL>"
+      }
+    ]
+  },
+  "uservideo_favorites": {
+    "total": 0,
+    "items": [],
+    "skip": 0,
+    "limit": 50
+  },
+  "sse_connection_body": {
+    "type": "connection",
+    "status": "connected",
+    "channel": "infox:<VIDEO_ID>",
+    "id": "<CONNECTION_ID>"
+  },
+  "sse_wire_example": "data: {\"type\":\"connection\",\"status\":\"connected\",\"channel\":\"infox:<VIDEO_ID>\",\"id\":\"<CONNECTION_ID>\"}\n\n"
+}
