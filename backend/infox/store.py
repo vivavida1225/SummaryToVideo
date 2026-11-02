@@ -11,7 +11,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from .run_models import Receipt, RunError, RunRecord, now
+from .run_models import Receipt, RunError, RunRecord, Tracking, now
 
 
 class RunStore:
@@ -83,6 +83,28 @@ class RunStore:
         with self._transaction() as conn:
             row = conn.execute('SELECT record FROM runs WHERE job_id=? ORDER BY rowid DESC LIMIT 1', (job_id,)).fetchone()
             return self._decode(row) if row is not None else None
+
+    def resumable(self) -> list[RunRecord]:
+        with self._transaction() as conn:
+            return [record for row in conn.execute('SELECT record FROM runs')
+                    if (record := self._decode(row)).stage not in
+                    ('prepared', 'draft_ready', 'ready_for_editor', 'failed', 'needs_attention')]
+
+    def track(self, run_id: str, tracking: Tracking, *, stage: str, expected_version: int) -> RunRecord:
+        if stage not in ('prepared', 'project_created', 'generating', 'checking_draft', 'draft_ready', 'needs_attention', 'failed'):
+            raise RunError('invalid_stage')
+        with self._edit(run_id, expected_version) as (record, data):
+            if record.stage in ('draft_ready', 'ready_for_editor', 'failed'):
+                raise RunError('invalid_stage')
+            if stage == 'prepared' and (record.project.state != 'not_sent' or record.generation.state != 'not_sent'):
+                raise RunError('invalid_stage')
+            if stage in ('generating', 'checking_draft', 'draft_ready') and (
+                    record.generation.state != 'accepted' or not record.video_id or not record.task_id):
+                raise RunError('invalid_stage')
+            if stage == 'draft_ready' and (not tracking.completion_seen or not tracking.draft.ready):
+                raise RunError('draft_not_ready')
+            data.update(tracking=tracking.model_dump(), stage=stage)
+        return self.get(run_id)
 
     def create(self, record: RunRecord, *, snapshot_key: str, intent_id: str,
                digest: str, new_run: bool) -> tuple[RunRecord, bool]:

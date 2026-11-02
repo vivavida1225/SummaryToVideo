@@ -47,6 +47,26 @@ const compressedSaveError = ref('')
 const composingCompressed = ref(false)
 const infoxRun = ref<InfoXRun | null>(null)
 const infoxLoading = ref(false)
+const infoxStarting = ref(false)
+let infoxPollTimer: number | undefined
+const infoxActiveStages = new Set(['creating_project', 'project_created', 'starting_generation', 'generating', 'checking_draft'])
+const infoxStageLabels: Record<string, string> = {
+  prepared: '전송본 확정 · 제작 요청 전', creating_project: 'InfoX 프로젝트 생성 요청 중',
+  project_created: '프로젝트 접수 · 영상 ID 확보', starting_generation: '시안 제작 시작 요청 중',
+  generating: '시안 제작 중 · 현재 작업의 완료 신호 대기', checking_draft: '완료 신호 수신 · 대본·음성·자막 확인 중',
+  draft_ready: '시안 준비 확인 · 에셋 검사는 다음 단계입니다.',
+  needs_attention: '확인이 필요합니다. 기존 실행 상태를 확인하세요.', failed: '제작 실패가 확인되었습니다.',
+}
+const infoxErrorLabels: Record<string, string> = {
+  authentication_required: 'InfoX 백엔드 인증 설정을 확인하세요.',
+  project_acceptance_unverifiable: '프로젝트 접수 여부를 확정하지 못했습니다. 새 프로젝트를 자동 생성하지 않습니다.',
+  generation_acceptance_unverifiable: '제작 시작 접수 여부를 확정하지 못했습니다. 기존 영상·작업부터 확인해야 합니다.',
+  completion_unconfirmed: '현재 작업의 실제 완료 신호를 확인하지 못했습니다.',
+  draft_not_ready: '완료 신호 뒤 대본·장면·음성·자막 준비 상태가 아직 일치하지 않습니다.',
+  remote_task_failed: '현재 작업의 실패 이벤트를 확인했습니다.',
+  connection_interrupted: '이벤트 연결이 중단되어 같은 영상·작업을 다시 확인하고 있습니다.',
+  internal_error: '추적을 계속하지 못했습니다. 보관된 실행 상태를 다시 확인하세요.',
+}
 const infoxError = ref('')
 const infoxReviewConfirmed = ref(false)
 const infoxTitle = ref('시황 영상')
@@ -129,6 +149,46 @@ function editCompressed(text: string) {
 
 const infoxPendingKey = (id: string) => `market-compressor.infox-pending.${id}`
 
+function stopInfoxPolling() {
+  if (infoxPollTimer !== undefined) window.clearTimeout(infoxPollTimer)
+  infoxPollTimer = undefined
+}
+
+function pollInfox(id: string) {
+  stopInfoxPolling()
+  infoxPollTimer = window.setTimeout(async () => {
+    if (disposed || infoxRun.value?.id !== id) return
+    try {
+      const record = await withInfoxSession(() => api.infoxRun(id))
+      if (disposed || infoxRun.value?.id !== id) return
+      infoxRun.value = record
+      if (record.tracking_active || (record.tracking_active === undefined &&
+          (infoxActiveStages.has(record.stage) || record.stage === 'prepared'))) pollInfox(id)
+    } catch (error) {
+      if (!disposed && infoxRun.value?.id === id) infoxError.value = friendlyError(error)
+    }
+  }, 1000)
+}
+
+async function startInfox() {
+  if (!infoxRun.value || infoxStarting.value || infoxLoading.value || inputBusy.value) return
+  const id = infoxRun.value.id
+  const jobId = job.value?.id
+  infoxStarting.value = true
+  infoxError.value = ''
+  try {
+    const record = await withInfoxSession(() => api.startInfox(id))
+    if (disposed || job.value?.id !== jobId || infoxRun.value?.id !== id) return
+    infoxRun.value = record
+    pollInfox(id)
+  } catch (error) {
+    if (!disposed && infoxRun.value?.id === id) {
+      infoxError.value = '요청 결과가 불명확합니다. 보관된 실행을 조회합니다. ' + friendlyError(error)
+      pollInfox(id) // Only GET; never replay an uncertain start POST.
+    }
+  } finally { infoxStarting.value = false }
+}
+
 async function withInfoxSession<T>(action: () => Promise<T>): Promise<T> {
   try { return await action() } catch (error) {
     if (!(error instanceof ApiError) || error.status !== 403) throw error
@@ -138,6 +198,7 @@ async function withInfoxSession<T>(action: () => Promise<T>): Promise<T> {
 }
 
 watch(() => job.value?.id, async id => {
+  stopInfoxPolling()
   infoxRun.value = null
   infoxError.value = ''
   infoxReviewConfirmed.value = false
@@ -163,6 +224,7 @@ watch(() => job.value?.id, async id => {
     const restored = await withInfoxSession(() => api.latestInfox(id))
     if (disposed || job.value?.id !== id) return
     infoxRun.value = restored
+    if (restored && (restored.tracking_active || infoxActiveStages.has(restored.stage))) pollInfox(restored.id)
     if (restored && !infoxPending.value) {
       infoxTitle.value = restored.snapshot.settings.title
       infoxAutoReplace.value = restored.snapshot.settings.auto_replace
@@ -341,6 +403,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  stopInfoxPolling()
   window.removeEventListener('beforeunload', warnUnsaved)
   document.removeEventListener('click', dismissMyassetSettings, true)
   disposed = true
@@ -735,7 +798,7 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
           <div>
             <p class="eyebrow">INFOX</p>
             <h3 id="infox-heading">영상 전송본 준비</h3>
-            <p>대본과 설정을 확정해 보관합니다. 아직 InfoX 영상은 생성하지 않습니다.</p>
+            <p>대본과 설정을 확정해 보관한 뒤, 확정본으로 제작을 시작합니다.</p>
           </div>
           <label for="infox-title">InfoX 영상 제목</label>
           <input id="infox-title" v-model="infoxTitle" type="text" maxlength="200" :disabled="inputBusy || infoxLoading || !!infoxPending" />
@@ -757,9 +820,19 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
           </button>
           <div v-if="infoxRun" class="infox-summary" aria-live="polite">
             <strong>{{ infoxRun.stage === 'prepared' ? '전송본이 확정되었습니다.' : '보관된 실행 기록을 복원했습니다.' }}</strong>
+            <p>{{ infoxStageLabels[infoxRun.stage] ?? infoxRun.stage }}</p>
+            <p v-if="infoxRun.tracking?.progress != null">제작 진행 표시 {{ infoxRun.tracking.progress }}%<template v-if="infoxActiveStages.has(infoxRun.stage)"> · 완료 판정은 작업 이벤트와 결과 검증을 기다립니다.</template></p>
+            <p v-if="infoxRun.tracking?.error_code">{{ infoxErrorLabels[infoxRun.tracking.error_code] ?? '기존 실행을 확인하세요.' }}</p>
             <p>확정 대본 버전 {{ infoxRun.snapshot.revision }} · {{ infoxRun.snapshot.scenes.length }}장면 · {{ infoxRun.snapshot.settings.title }}</p>
             <p v-if="infoxRun.requires_reconciliation">접수 여부 확인이 필요합니다. 기존 실행은 다시 전송하지 않습니다.</p>
             <p v-if="infoxChanged">현재 편집본 또는 설정이 확정본과 다릅니다.</p>
+            <p v-if="infoxRun.video_id">영상 ID: {{ infoxRun.video_id }} · 작업 ID: {{ infoxRun.task_id ?? '접수 확인 전' }}</p>
+            <button v-if="['prepared', 'needs_attention', 'project_created'].includes(infoxRun.stage)" type="button" class="ghost-button"
+              :disabled="inputBusy || infoxLoading || infoxStarting" @click="startInfox">
+              {{ infoxStarting ? '요청 확인 중…' : infoxRun.stage === 'prepared' ? '확정본으로 InfoX 제작 시작' : '기존 실행 상태 다시 확인' }}
+            </button>
+            <button v-if="infoxActiveStages.has(infoxRun.stage)" type="button" class="ghost-button" @click="pollInfox(infoxRun.id)">진행 상태 다시 조회</button>
+            <p v-if="infoxRun.editor_url"><a :href="infoxRun.editor_url" target="_blank" rel="noopener noreferrer">InfoX 편집 화면 수동 열기</a></p>
           </div>
         </section>
       </section>

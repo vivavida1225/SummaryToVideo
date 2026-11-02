@@ -1,4 +1,4 @@
-"""Real local API + Chromium check for phase 2. No model or InfoX HTTP calls."""
+"""Real local API + Chromium check for phases 2/3. External InfoX is controlled."""
 
 import shutil
 import socket
@@ -16,6 +16,7 @@ from backend.infox.service import RunService
 from backend.infox.store import RunStore
 from backend.jobs import JobManager
 from tests.test_api import Clipboard
+from tests.test_infox_generation import FakeClient
 
 
 def main():
@@ -84,16 +85,32 @@ def main():
                 editor.fill('새로운 수정본')
                 expect(page.get_by_text('현재 편집본 또는 설정이 확정본과 다릅니다.', exact=True)).to_be_visible()
                 assert app.state.infox_runs.get(record['id']).snapshot.text == edited
+                # Start the previously confirmed snapshot after a later edit;
+                # backend manager owns admission and tracking independently of UI.
+                run_manager = app.state.infox_manager
+                fake = FakeClient(run_manager.store, run_manager.store.get(record['id']))
+                run_manager.client_factory = lambda: fake
+                start_requests = []
+                page.on('request', lambda req: start_requests.append(req.url) if req.url.endswith('/start') else None)
+                page.get_by_role('button', name='확정본으로 InfoX 제작 시작', exact=True).click()
+                expect(page.get_by_text('시안 준비 확인 · 에셋 검사는 다음 단계입니다.', exact=True)).to_be_visible(timeout=10000)
+                link = page.get_by_role('link', name='InfoX 편집 화면 수동 열기')
+                expect(link).to_have_attribute('href', 'https://infox2.infomaxai.com/studio/library/videos/video-1?chatboxView=script')
+                assert fake.calls == ['project', 'generation']
+                assert run_manager.store.get(record['id']).snapshot.text == edited
+                page.reload(wait_until='networkidle')
+                expect(page.get_by_text('시안 준비 확인 · 에셋 검사는 다음 단계입니다.', exact=True)).to_be_visible()
+                assert len(start_requests) == 1 and fake.calls == ['project', 'generation']
                 # Verify layout and capture only synthetic test data.
                 for width in (390, 1440):
                     page.set_viewport_size({'width': width, 'height': 1000})
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                     page.get_by_role('heading', name='영상 전송본 준비').scroll_into_view_if_needed()
-                    page.screenshot(path=str(root / f'.runtime/infox-phase2-{width}.png'), full_page=True)
+                    page.screenshot(path=str(root / f'.runtime/infox-phase3-{width}.png'), full_page=True)
                 assert not errors, errors
                 assert not external_requests, 'Unexpected external browser requests'
                 browser.close()
-            print('PASS: saved edit snapshot, review confirmation, duplicate reuse, disk restore, immutable original, responsive layout, no external requests')
+            print('PASS: saved snapshot/review, one-shot generation, task completion/draft checks, manual editor link, reload without resend, responsive layout, no external browser requests')
         finally:
             server.should_exit = True
             thread.join(timeout=10)

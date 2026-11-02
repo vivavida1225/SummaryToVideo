@@ -1,0 +1,315 @@
+import asyncio
+import copy
+import json
+
+import httpx
+import pytest
+
+from backend.infox.client import InfoXClient
+from backend.infox.config import InfoXCredentials
+from backend.infox.errors import InfoXError
+from backend.infox.service import RunService
+from backend.infox.store import RunStore
+from tests.test_infox_runs_api import seed, JOB_ID, payload
+from backend.infox.run_models import PrepareRunInput
+from backend.jobs import JobManager
+from backend.config import Settings
+
+
+def prepared(root):
+    seed(root)
+    store = RunStore(root)
+    record, _ = RunService(JobManager(Settings(root)), store).prepare(JOB_ID, PrepareRunInput(**payload()))
+    return store, record
+
+
+def draft(record):
+    return {'id': 'video-1', 'can_edit': True, 'video': {'scenes': [
+        {'voiceover': {'content': s.text, 'filename': 'voice.wav', 'bucket': 'voice',
+         'audio_duration': 2.0, 'voice_id': record.snapshot.settings.voice_id,
+         'voice_provider': 'elevenlabs', 'voice_speed': '1.0',
+         'segment_captions': [{'text': s.text, 'startMs': 0, 'endMs': 2000}]}}
+        for s in record.snapshot.scenes]}}
+
+
+def test_write_methods_never_retry_even_get_or_401():
+    async def scenario(status):
+        calls = []
+        def handler(req):
+            calls.append(req.url.path)
+            return httpx.Response(status, json={'id': 'video-1', 'taskid': 'task-1', 'message': 'generate_type_text'})
+        async with InfoXClient(InfoXCredentials(access_token='test'), transport=httpx.MockTransport(handler)) as c:
+            for method in (lambda: c.create_project({'video': {}, 'context': {}}), lambda: c.start_generation('video-1')):
+                if status != 200:
+                    with pytest.raises(InfoXError):
+                        await method()
+                else:
+                    assert await method() in ('video-1', 'task-1')
+        assert len(calls) == 2
+    for status in (200, 401, 429, 500):
+        asyncio.run(scenario(status))
+
+
+def test_draft_checks_exact_scenes_voice_and_timed_caption_text(tmp_path):
+    from backend.infox.tracking import verify_draft
+    _, r = prepared(tmp_path)
+    r = r.model_copy(update={'video_id': 'video-1'})
+    state = draft(r)
+    assert verify_draft(r, state).ready
+    for mutation in ('text', 'count', 'voice', 'caption', 'duration', 'id'):
+        bad = copy.deepcopy(state)
+        v = bad['video']['scenes'][0]['voiceover']
+        if mutation == 'text': v['content'] = '다른 대본'
+        if mutation == 'count': bad['video']['scenes'].pop()
+        if mutation == 'voice': v['filename'] = ''
+        if mutation == 'caption': v['segment_captions'][0]['text'] = '다른 자막'
+        if mutation == 'duration': v['audio_duration'] = 0
+        if mutation == 'id': bad['id'] = 'other'
+        assert not verify_draft(r, bad).ready, mutation
+
+
+def test_event_matching_rejects_false_completion_and_foreign_task(tmp_path):
+    from backend.infox.tracking import task_event
+    for body in ({'type': 'connection', 'status': 'connected'},
+                 {'additional_kwargs': {'taskid': 'other', 'task_status': 'completed'}},
+                 {'channel': 'infox:other', 'additional_kwargs': {'taskid': 'task-1', 'task_status': 'completed'}}):
+        assert task_event(body, 'video-1', 'task-1') is None
+    for status, expected in (('running', 'running'), ('processing', 'running'), ('completed', 'completed'), ('failed', 'failed')):
+        b = {'additional_kwargs': {'taskid': 'task-1', 'task_status': status, 'progress': 100}}
+        assert task_event(b, 'video-1', 'task-1').status == expected
+    b['additional_kwargs'].update(task_status='completed', error='SECRET remote failure')
+    event = task_event(b, 'video-1', 'task-1')
+    assert event.status == 'failed' and 'SECRET' not in event.model_dump_json()
+
+
+def test_batch_completion_and_failure_are_not_hidden_by_earlier_progress():
+    from backend.infox.tracking import task_event
+    def msg(status): return {'additional_kwargs': {'taskid': 'task-1', 'task_status': status}}
+    assert task_event({'messages': [msg('processing'), msg('completed')]}, 'video-1', 'task-1').status == 'completed'
+    assert task_event({'messages': [msg('completed'), msg('failed')]}, 'video-1', 'task-1').status == 'failed'
+
+
+class FakeClient:
+    def __init__(self, store, record, *, lost=None, failed=False, delayed=0, disconnect=False, missing=False):
+        self.store, self.record = store, record
+        self.lost, self.failed, self.delayed = lost, failed, delayed
+        self.disconnect, self.missing = disconnect, missing
+        self.calls, self.reads, self.connections = [], 0, 0
+        self.started = asyncio.Event()
+
+    async def __aenter__(self): return self
+    async def __aexit__(self, *args): pass
+    async def authenticate(self): pass
+
+    async def create_project(self, body):
+        assert self.store.get(self.record.id).project.state == 'intent_recorded'
+        assert body['context']['data']['inputText'] == self.record.snapshot.text
+        self.calls.append('project')
+        if self.lost == 'project': raise InfoXError('timeout')
+        return 'video-1'
+
+    async def start_generation(self, video_id):
+        assert video_id == 'video-1'
+        assert self.connections > 0
+        assert self.store.get(self.record.id).generation.state == 'intent_recorded'
+        self.calls.append('generation')
+        self.started.set()
+        # Permit the completion event to beat the HTTP response.
+        await asyncio.sleep(.002)
+        if self.lost == 'generation': raise InfoXError('timeout')
+        return 'task-1'
+
+    async def video_state(self, video_id):
+        self.reads += 1
+        value = draft(self.record)
+        if self.reads <= self.delayed:
+            value['video']['scenes'] = []
+        return value
+
+    async def render_logs(self, video_id): return {'logs': []}
+
+    async def events(self, video_id, **kwargs):
+        from backend.infox.sse import SSEEvent
+        self.connections += 1
+        yield SSEEvent(data=json.dumps({'type': 'connection', 'status': 'connected', 'channel': 'infox:video-1'}))
+        await self.started.wait()
+        if self.disconnect and self.connections == 1:
+            raise InfoXError('network_error')
+        if not self.missing:
+            body = {'channel': 'infox:video-1', 'additional_kwargs': {'taskid': 'task-1',
+                    'task_status': 'failed' if self.failed else 'completed', 'progress': 100}}
+            for _ in range(2):
+                yield SSEEvent(data=json.dumps(body), id='duplicate')
+        await asyncio.Event().wait()
+
+
+def test_manager_one_shot_admission_early_event_reconnect_and_delayed_data(tmp_path):
+    from backend.infox.manager import RunManager
+    async def scenario():
+        store, record = prepared(tmp_path)
+        fake = FakeClient(store, record, delayed=2, disconnect=True)
+        manager = RunManager(store, lambda: fake, tracking_timeout=.4, retry_delay=.001)
+        await asyncio.gather(manager.start(record.id), manager.start(record.id))
+        await manager.wait(record.id)
+        final = store.get(record.id)
+        assert final.stage == 'draft_ready'
+        assert final.video_id == 'video-1' and final.task_id == 'task-1'
+        assert final.tracking.completion_seen and final.tracking.draft.ready
+        assert final.tracking.event_count == 1 and final.tracking.reconnects >= 1
+        assert fake.calls == ['project', 'generation']
+        assert fake.reads >= 3
+        await manager.start(record.id)
+        await manager.wait(record.id)
+        assert fake.calls == ['project', 'generation']
+        await manager.close()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('lost', ['project', 'generation'])
+def test_manager_unknown_receipt_survives_restart_without_write(tmp_path, lost):
+    from backend.infox.manager import RunManager
+    async def scenario():
+        store, record = prepared(tmp_path)
+        fake = FakeClient(store, record, lost=lost)
+        manager = RunManager(store, lambda: fake, tracking_timeout=.05, retry_delay=.001)
+        await manager.start(record.id)
+        await manager.wait(record.id)
+        final = store.get(record.id)
+        assert final.requires_reconciliation and getattr(final, lost).state == 'unknown'
+        calls = list(fake.calls)
+        restored = RunManager(RunStore(tmp_path), lambda: fake, tracking_timeout=.05, retry_delay=.001)
+        await restored.recover()
+        await restored.wait(record.id)
+        assert fake.calls == calls
+        assert store.get(record.id).stage == 'needs_attention'
+        await manager.close()
+        await restored.close()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize('failed,missing,expected', [(True, False, 'failed'), (False, True, 'needs_attention')])
+def test_manager_never_claims_complete_on_failure_or_missing_event(tmp_path, failed, missing, expected):
+    from backend.infox.manager import RunManager
+    async def scenario():
+        store, record = prepared(tmp_path)
+        fake = FakeClient(store, record, failed=failed, missing=missing)
+        manager = RunManager(store, lambda: fake, tracking_timeout=.04, retry_delay=.001)
+        await manager.start(record.id)
+        await manager.wait(record.id)
+        assert store.get(record.id).stage == expected
+        await manager.close()
+    asyncio.run(scenario())
+
+
+def test_start_api_is_guarded_and_background_run_can_be_polled(tmp_path):
+    import time
+    from tests.test_api import client, auth
+    seed(tmp_path)
+    with client(tmp_path) as c:
+        headers = auth(c)
+        r = c.post(f'/api/jobs/{JOB_ID}/infox-runs', headers=headers, json=payload()).json()
+        manager = c.app.state.infox_manager
+        fake = FakeClient(manager.store, manager.store.get(r['id']))
+        manager.client_factory = lambda: fake
+        url = f'/api/infox-runs/{r["id"]}/start'
+        assert c.post(url).status_code == 403
+        assert c.post(url, headers={**headers, 'Origin': 'https://evil.invalid'}).status_code == 403
+        assert c.post(url, headers=headers).status_code == 202
+        assert c.post(url, headers=headers).status_code == 202
+        for _ in range(100):
+            result = c.get(f'/api/infox-runs/{r["id"]}', headers=headers).json()
+            if result['stage'] == 'draft_ready': break
+            time.sleep(.01)
+        assert result['stage'] == 'draft_ready'
+        assert result['editor_url'].endswith('/video-1?chatboxView=script')
+        assert fake.calls == ['project', 'generation']
+
+
+def test_auth_failure_before_send_can_resume_same_snapshot(tmp_path):
+    from backend.infox.manager import RunManager
+    async def scenario():
+        store, record = prepared(tmp_path)
+        fake = FakeClient(store, record)
+        async def expired(): raise InfoXError('auth_expired')
+        good_auth = fake.authenticate
+        fake.authenticate = expired
+        manager = RunManager(store, lambda: fake, tracking_timeout=.1, retry_delay=.001)
+        await manager.start(record.id)
+        await manager.wait(record.id)
+        assert store.get(record.id).tracking.error_code == 'authentication_required'
+        assert store.get(record.id).project.state == 'not_sent'
+        fake.authenticate = good_auth
+        await manager.start(record.id)
+        await manager.wait(record.id)
+        assert store.get(record.id).stage == 'draft_ready'
+        await manager.close()
+    asyncio.run(scenario())
+
+
+def test_successful_external_id_is_not_lost_when_another_manager_reconciles_intent(tmp_path):
+    from backend.infox.manager import RunManager
+    async def scenario():
+        store, record = prepared(tmp_path)
+        fake = FakeClient(store, record)
+        original = fake.create_project
+        in_flight, release = asyncio.Event(), asyncio.Event()
+        async def slow(body):
+            in_flight.set()
+            await release.wait()
+            return await original(body)
+        fake.create_project = slow
+        first = RunManager(store, lambda: fake, tracking_timeout=.1, retry_delay=.001)
+        second = RunManager(RunStore(tmp_path), lambda: fake, tracking_timeout=.1, retry_delay=.001)
+        await first.start(record.id)
+        await in_flight.wait()
+        await second.start(record.id)
+        await second.wait(record.id)
+        release.set()
+        await first.wait(record.id)
+        final = store.get(record.id)
+        assert final.project.state == 'accepted' and final.video_id == 'video-1'
+        assert final.generation.state == 'accepted' and final.task_id == 'task-1'
+        assert fake.calls == ['project', 'generation']
+        await first.close()
+        await second.close()
+    asyncio.run(scenario())
+
+
+def test_persisted_completion_recovers_read_only_and_auth_error_is_distinct(tmp_path):
+    from backend.infox.manager import RunManager
+    async def scenario():
+        store, r = prepared(tmp_path)
+        r = store.begin_request(r.id, 'project', expected_version=r.version)
+        r = store.record_outcome(r.id, 'project', 'accepted', external_id='video-1', expected_version=r.version)
+        r = store.begin_request(r.id, 'generation', expected_version=r.version)
+        r = store.record_outcome(r.id, 'generation', 'accepted', external_id='task-1', expected_version=r.version)
+        store.track(r.id, r.tracking.model_copy(update={'completion_seen': True, 'task_status': 'completed'}),
+                    stage='checking_draft', expected_version=r.version)
+        fake = FakeClient(store, r)
+        good_read = fake.video_state
+        reads = 0
+        async def read(video_id):
+            nonlocal reads
+            reads += 1
+            if reads > 1: raise InfoXError('auth_expired')
+            return await good_read(video_id)
+        fake.video_state = read
+        manager = RunManager(store, lambda: fake, tracking_timeout=.1, retry_delay=.001)
+        await manager.recover()
+        await manager.wait(r.id)
+        assert store.get(r.id).tracking.error_code == 'authentication_required'
+        fake.video_state = good_read
+        await manager.start(r.id)
+        await manager.wait(r.id)
+        assert store.get(r.id).stage == 'draft_ready' and fake.calls == []
+        await manager.close()
+    asyncio.run(scenario())
+
+
+def test_unavailable_run_database_does_not_block_narration_app_start(tmp_path):
+    from unittest.mock import patch
+    from tests.test_api import client
+    from backend.infox.run_models import RunError
+    with patch.object(RunStore, 'resumable', side_effect=RunError('storage_error', 503)):
+        with client(tmp_path) as c:
+            assert c.get('/api/health').status_code == 200

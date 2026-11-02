@@ -83,6 +83,7 @@ export interface InfoXRun {
   stage: string
   version: number
   requires_reconciliation: boolean
+  tracking_active?: boolean
   snapshot: {
     job_id: string
     revision: number
@@ -93,4 +94,13 @@ export interface InfoXRun {
   }
   video_id: string | null
   task_id: string | null
+  editor_url?: string | null
+  tracking?: {
+    completion_seen: boolean
+    task_status: string
+    progress: number | null
+    error_code?: string | null
+    reconnects?: number
+    draft?: { identity_matches: boolean; scenes_match: boolean; voices_ready: boolean; captions_ready: boolean }
+  }
 }

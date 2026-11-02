@@ -81,6 +81,58 @@ async function finishBootstrap() {
 }
 
 describe('App', () => {
+  it('InfoX 제작 시작 응답 유실은 POST를 반복하지 않고 실행 조회로 복구한다', async () => {
+    sessionStorage.setItem('market-compressor.job-id', 'job-1')
+    const run = makeInfoxRun()
+    let starts = 0
+    let reads = 0
+    installBootstrapFetch((path) => {
+      if (path.endsWith('/start')) { starts++; throw new TypeError('Failed to fetch') }
+      if (path === `/api/infox-runs/${run.id}`) {
+        reads++
+        return jsonResponse({ ...run, stage: reads === 1 ? 'needs_attention' : 'draft_ready',
+          tracking_active: reads === 1 })
+      }
+      if (path.endsWith('/infox-runs')) return jsonResponse({ run })
+      if (path === '/api/jobs/job-1') return jsonResponse(makeJob({ state: 'completed', compressed: '원본', revision: 0 }))
+      throw new Error(`unexpected ${path}`)
+    })
+    render(App)
+    const button = await screen.findByRole('button', { name: '확정본으로 InfoX 제작 시작' })
+    await waitFor(() => expect(button).toBeEnabled())
+    await fireEvent.click(button)
+    await screen.findByText('시안 준비 확인 · 에셋 검사는 다음 단계입니다.', {}, { timeout: 5000 })
+    expect(starts).toBe(1)
+    expect(reads).toBe(2)
+  })
+  it('InfoX 제작은 확정 스냅샷 실행 ID로 시작하고 조회하여 시안 준비와 수동 편집 링크를 표시한다', async () => {
+    sessionStorage.setItem('market-compressor.job-id', 'job-1')
+    const run = makeInfoxRun()
+    let started = false
+    let starts = 0
+    const fetchMock = installBootstrapFetch((path, init) => {
+      if (path.endsWith('/start')) {
+        starts++
+        started = true
+        return jsonResponse({ ...run, stage: 'creating_project' }, 202)
+      }
+      if (path === `/api/infox-runs/${run.id}`) return jsonResponse({ ...run, stage: 'draft_ready',
+        video_id: 'video-1', task_id: 'task-1', editor_url: 'https://infox2.infomaxai.com/studio/library/videos/video-1?chatboxView=script',
+        tracking: { completion_seen: true, task_status: 'completed', progress: 100 } })
+      if (path.endsWith('/infox-runs')) return jsonResponse({ run })
+      if (path === '/api/jobs/job-1') return jsonResponse(makeJob({ state: 'completed', compressed: '원본', revision: 0 }))
+      throw new Error(`unexpected ${path} ${init.method}`)
+    })
+    render(App)
+    const button = await screen.findByRole('button', { name: '확정본으로 InfoX 제작 시작' })
+    await waitFor(() => expect(button).toBeEnabled())
+    expect(started).toBe(false)
+    await fireEvent.click(button)
+    await screen.findByText('시안 준비 확인 · 에셋 검사는 다음 단계입니다.', {}, { timeout: 4000 })
+    expect(starts).toBe(1)
+    expect(screen.getByRole('link', { name: 'InfoX 편집 화면 수동 열기' })).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(fetchMock.mock.calls.some(([input]) => requestPath(input).includes('/infox-runs/'))).toBe(true)
+  })
   it('InfoX 확정은 편집 저장 후 최신 revision을 사용하며 중복 클릭을 막는다', async () => {
     sessionStorage.setItem('market-compressor.job-id', 'job-1')
     const original = makeJob({ state: 'completed', compressed: '원본', revision: 0 })

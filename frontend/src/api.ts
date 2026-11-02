@@ -46,6 +46,10 @@ export async function bootstrapSession(): Promise<SessionInfo> {
 }
 
 export const api = {
+  startInfox(id: string): Promise<InfoXRun> {
+    return request(`/api/infox-runs/${encodeURIComponent(id)}/start`, { method: 'POST' })
+  },
+
   prepareInfox(id: string, input: InfoXPrepareInput): Promise<InfoXRun> {
     return request(`/api/jobs/${encodeURIComponent(id)}/infox-runs`, { method: 'POST', body: JSON.stringify(input) })
   },

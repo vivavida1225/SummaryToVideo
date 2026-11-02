@@ -1,0 +1,344 @@
+{
+  "verified_at": "2026-11-02T11:24:00.444786",
+  "stage": "draft_ready",
+  "same_run": true,
+  "project_accepted": true,
+  "generation_accepted": true,
+  "video_id_recorded": true,
+  "task_id_recorded": true,
+  "snapshot_unchanged": true,
+  "tracking": {
+    "completion_seen": true,
+    "task_status": "completed",
+    "progress": 100,
+    "last_event_at": "2026-11-02T02:24:00.269372+00:00",
+    "last_checked_at": "2026-11-02T02:24:00.373095+00:00",
+    "event_count": 28,
+    "reconnects": 0,
+    "error_code": null,
+    "draft": {
+      "identity_matches": true,
+      "scenes_match": true,
+      "voices_ready": true,
+      "captions_ready": true
+    }
+  },
+  "observed_event_examples": [
+    {
+      "type": "connection",
+      "status": "connected",
+      "channel": "<REDACTED_IDENTIFIER>",
+      "id": "<REDACTED_IDENTIFIER>"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "progress": 0,
+        "error": false
+      },
+      "content": "str"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "task_status": "processing",
+        "progress": 1,
+        "error": false
+      },
+      "content": "str"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "task_status": "processing",
+        "progress": 70,
+        "error": false
+      },
+      "content": "str"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "task_status": "processing",
+        "progress": 75,
+        "error": false
+      },
+      "content": "str"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "task_status": "processing",
+        "progress": 76,
+        "error": false
+      },
+      "content": "str"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "task_status": "processing",
+        "progress": 77,
+        "error": false
+      },
+      "content": "str"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "task_status": "processing",
+        "progress": 78,
+        "error": false
+      },
+      "content": "str"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "task_status": "processing",
+        "progress": 79,
+        "error": false
+      },
+      "content": "str"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "task_status": "processing",
+        "progress": 80,
+        "error": false
+      },
+      "content": "str"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "task_status": "processing",
+        "progress": 81,
+        "error": false
+      },
+      "content": "str"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "task_status": "processing",
+        "progress": 82,
+        "error": false
+      },
+      "content": "str"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "task_status": "processing",
+        "progress": 83,
+        "error": false
+      },
+      "content": "str"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "task_status": "processing",
+        "progress": 84,
+        "error": false
+      },
+      "content": "str"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "task_status": "processing",
+        "progress": 85,
+        "error": false
+      },
+      "content": "str"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "task_status": "processing",
+        "progress": 86,
+        "error": false
+      },
+      "content": "str"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "task_status": "processing",
+        "progress": 87,
+        "error": false
+      },
+      "content": "str"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "task_status": "processing",
+        "progress": 88,
+        "error": false
+      },
+      "content": "str"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "task_status": "processing",
+        "progress": 89,
+        "error": false
+      },
+      "content": "str"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "task_status": "processing",
+        "progress": 90,
+        "error": false
+      },
+      "content": "str"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "task_status": "processing",
+        "progress": 91,
+        "error": false
+      },
+      "content": "str"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "task_status": "processing",
+        "progress": 92,
+        "error": false
+      },
+      "content": "str"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "task_status": "processing",
+        "progress": 93,
+        "error": false
+      },
+      "content": "str"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "task_status": "processing",
+        "progress": 94,
+        "error": false
+      },
+      "content": "str"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "task_status": "processing",
+        "progress": 95,
+        "error": false
+      },
+      "content": "str"
+    },
+    {
+      "status": "NoneType",
+      "id": "<REDACTED_IDENTIFIER>",
+      "additional_kwargs": {
+        "id": "<REDACTED_IDENTIFIER>",
+        "taskid": "<REDACTED_IDENTIFIER>",
+        "task_status": "completed",
+        "progress": 100,
+        "error": false
+      },
+      "content": "str"
+    }
+  ],
+  "live_failure_event_observed": false,
+  "read_only_reverification": {
+    "at": "2026-11-02T02:32:35.869744+00:00",
+    "same_durable_run": true,
+    "draft": {
+      "identity_matches": true,
+      "scenes_match": true,
+      "voices_ready": true,
+      "captions_ready": true
+    }
+  }
+}

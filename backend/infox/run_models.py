@@ -87,8 +87,33 @@ class Receipt(StrictModel):
 
 
 RunStage = Literal['prepared', 'creating_project', 'project_created', 'starting_generation', 'generating',
-    'checking_draft', 'auditing_assets', 'selecting_favorites', 'replacing_assets', 'saving_assets',
+    'checking_draft', 'draft_ready', 'auditing_assets', 'selecting_favorites', 'replacing_assets', 'saving_assets',
     'verifying_assets', 'ready_for_editor', 'needs_attention', 'failed']
+
+
+class DraftCheck(StrictModel):
+    identity_matches: bool = False
+    scenes_match: bool = False
+    voices_ready: bool = False
+    captions_ready: bool = False
+
+    @property
+    def ready(self) -> bool:
+        return all((self.identity_matches, self.scenes_match, self.voices_ready, self.captions_ready))
+
+
+class Tracking(StrictModel):
+    completion_seen: bool = False
+    task_status: Literal['waiting', 'running', 'completed', 'failed', 'unrecognized'] = 'waiting'
+    progress: int | None = Field(default=None, ge=0, le=100)
+    last_event_at: str | None = None
+    last_checked_at: str | None = None
+    event_count: int = Field(default=0, ge=0)
+    reconnects: int = Field(default=0, ge=0)
+    error_code: Literal['authentication_required', 'project_acceptance_unverifiable',
+        'generation_acceptance_unverifiable', 'completion_unconfirmed', 'draft_not_ready',
+        'remote_task_failed', 'connection_interrupted', 'internal_error'] | None = None
+    draft: DraftCheck = Field(default_factory=DraftCheck)
 
 
 class RunRecord(StrictModel):
@@ -103,6 +128,7 @@ class RunRecord(StrictModel):
     generation: Receipt = Field(default_factory=Receipt)
     video_id: str | None = Field(default=None, pattern=r'^[A-Za-z0-9_-]{1,128}$')
     task_id: str | None = Field(default=None, pattern=r'^[A-Za-z0-9_-]{1,128}$')
+    tracking: Tracking = Field(default_factory=Tracking)
 
     @property
     def requires_reconciliation(self) -> bool:
@@ -114,4 +140,6 @@ def text_hash(text: str) -> str:
 
 
 def public_record(record: RunRecord) -> dict:
-    return {**record.model_dump(mode='json'), 'requires_reconciliation': record.requires_reconciliation}
+    editor = f'https://infox2.infomaxai.com/studio/library/videos/{record.video_id}?chatboxView=script' if record.video_id else None
+    return {**record.model_dump(mode='json'), 'requires_reconciliation': record.requires_reconciliation,
+            'editor_url': editor}

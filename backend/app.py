@@ -18,6 +18,9 @@ from .jobs import EditConflict, JobConflict, JobManager
 from .infox.run_models import PrepareRunInput, RunError, public_record
 from .infox.service import RunService
 from .infox.store import RunStore
+from .infox.manager import RunManager
+from .infox.client import InfoXClient
+from .infox.config import InfoXCredentials
 from .models import MODELS, model_candidates
 from .myasset import MyassetError, fetch_myasset_source
 from .storage import list_sources, source_path
@@ -82,17 +85,23 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
     settings = settings or Settings()
     manager = JobManager(settings, clipboard=clipboard, compressor_factory=compressor_factory)
     infox_runs = RunService(manager, RunStore(settings.root))
+    infox_manager = RunManager(infox_runs.store, lambda: InfoXClient(InfoXCredentials.load(settings.root)))
     token = secrets.token_urlsafe(32)
     identity = instance_id or secrets.token_hex(16)
 
     @asynccontextmanager
     async def lifespan(_app):
-        yield
-        await manager.close()
+        await infox_manager.recover()
+        try:
+            yield
+        finally:
+            await infox_manager.close()
+            await manager.close()
 
     app = FastAPI(title='Summary to Video', docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.manager = manager
     app.state.infox_runs = infox_runs
+    app.state.infox_manager = infox_manager
 
     @app.middleware('http')
     async def local_guard(request: Request, call_next):
@@ -211,6 +220,9 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
         except (ValueError, OSError, KeyError):
             raise HTTPException(404, '작업 기록을 찾을 수 없습니다.') from None
 
+    def infox_view(record):
+        return {**public_record(record), 'tracking_active': infox_manager.active(record.id)}
+
     @app.get('/api/jobs/{job_id}')
     async def get_job(job_id: str):
         return find_job(job_id)
@@ -219,17 +231,21 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
     async def prepare_infox_run(job_id: str, data: PrepareRunInput):
         find_job(job_id)
         record, reused = infox_runs.prepare(job_id, data)
-        return JSONResponse(public_record(record), status_code=200 if reused else 201)
+        return JSONResponse(infox_view(record), status_code=200 if reused else 201)
 
     @app.get('/api/jobs/{job_id}/infox-runs')
     async def latest_infox_run(job_id: str):
         find_job(job_id)
         record = infox_runs.latest(job_id)
-        return {'run': public_record(record) if record is not None else None}
+        return {'run': infox_view(record) if record is not None else None}
 
     @app.get('/api/infox-runs/{run_id}')
     async def get_infox_run(run_id: str):
-        return public_record(infox_runs.get(run_id))
+        return infox_view(infox_runs.get(run_id))
+
+    @app.post('/api/infox-runs/{run_id}/start', status_code=202)
+    async def start_infox_run(run_id: str):
+        return infox_view(await infox_manager.start(run_id))
 
     @app.post('/api/jobs/{job_id}/retry', status_code=202)
     async def retry_job(job_id: str, data: ModelInput | None = None):

@@ -1,4 +1,4 @@
-"""Read-only InfoX adapter, except explicit authentication/token renewal.
+"""InfoX adapter with retryable reads and explicitly one-shot generation writes.
 
 Fixed origin, verified TLS, no redirects, no generic write method. Keep this
 boundary separate from the local X-App-Token and future generation operations.
@@ -160,6 +160,29 @@ class InfoXClient:
         if str(result.get('id')) != video_id or not isinstance(result.get('video'), dict):
             raise InfoXError('invalid_response')
         return result
+
+    async def create_project(self, body: dict) -> str:
+        # Caller must durably claim the intent first. Never retry, even on 401.
+        await self.authenticate()
+        result = await self._json_once('POST', '/infomaxai/videos/create_video_new', body=body)
+        try:
+            return _identifier(result.get('id'))
+        except InfoXError:
+            raise InfoXError('invalid_response') from None
+
+    async def start_generation(self, video_id: str) -> str:
+        # This GET has side effects and MUST NOT pass through _read().
+        await self.authenticate()
+        result = await self._json_once('GET', f'/infomaxai/worker/infox_generate_type_text/{_identifier(video_id)}')
+        if result.get('message') != 'generate_type_text':
+            raise InfoXError('invalid_response')
+        try:
+            return _identifier(result.get('taskid'))
+        except InfoXError:
+            raise InfoXError('invalid_response') from None
+
+    async def render_logs(self, video_id: str) -> dict:
+        return await self._read('GET', f'/infomaxai/videos/video_render_logs/{_identifier(video_id)}')
 
     async def search_favorites(self, *, search: str = '반도체', source: str = 'video',
                                skip: int = 0, limit: int = 50, date_from: str | None = None) -> dict:

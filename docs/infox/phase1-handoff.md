@@ -1,14 +1,14 @@
-# InfoX 1·2단계 완료 및 3단계 인계
+# InfoX 1·2·3단계 완료 및 4단계 인계
 
 작성일: 2026-11-02 (한국 시간). 프로젝트: `C:\WORKS\SummaryToVideo`, 브랜치: `master`.
 
-현재는 **1·2단계 완료**다. 이 문서의 기존 1단계 기록 뒤에 **2단계 구현·검증·3단계 인계**를 추가했다. 다음 작업자는 아래 추가 기록과 [2단계 실행 문서](phase2-runs.md)부터 읽는다.
+현재는 **1·2·3단계 완료**다. 아래 기존 단계의 기록은 당시 범위이며, 문서 마지막의 **3단계 구현·실검증·4단계 진입점**이 현재 기준이다. [2단계 실행 문서](phase2-runs.md)의 스냅샷·CAS 계약도 계속 적용한다.
 
 ## 1단계 완료 기록
 
 [자동화 명세](automation-implementation-spec.md) §15의 **1단계 InfoX 연결 검증**을 구현했다. 백엔드 독립 클라이언트에서 실제 로그인, 기존 영상 조회, 토큰 갱신, 갱신 후 동일 영상 재조회, `반도체` 즐겨찾기 검색, 해당 기존 영상 채널 SSE의 JSON 본문 수신을 확인했다.
 
-1단계에는 프로젝트 생성·제작 시작·에셋 변경·편집 저장을 추가하지 않았으며 기존 앱 흐름과 보안 정책을 유지했다. 현재 2단계 변경은 아래 추가 기록에서 구분한다. 외부 제작·에셋 변경은 여전히 후속 단계다.
+1단계에는 프로젝트 생성·제작 시작·에셋 변경·편집 저장을 추가하지 않았으며 기존 앱 흐름과 보안 정책을 유지했다. 2·3단계 변경은 아래 추가 기록에서 구분한다. 에셋 변경은 여전히 후속 단계다.
 
 ## 먼저 읽을 파일
 
@@ -147,3 +147,80 @@ SQLite `BEGIN IMMEDIATE` 안에서 실행과 intent 별칭을 함께 커밋한�
 - 독립 코드 리뷰: Critical/Important 문제 없음. 초기 실행 복원 중 설정을 수정하면 늦은 응답이 덮는 Minor race를 재현 테스트로 확인하고 복원 중 설정 잠금으로 수정했다.
 - 실제 Edge/Chromium과 로컬 API: 편집 저장 후 확정, 검토 체크, 중복 클릭 재사용, 새 JobManager/RunStore의 디스크 복원, 이후 편집과 스냅샷 분리, 390/1440px 레이아웃을 확인했다. 외부 브라우저 요청은 0회다. 모든 테스트 자료는 임시 프로젝트의 표시용 대본이다.
 - 기존 미커밋 루트 README·런처·출력물은 2단계에서도 보존하고 커밋에서 제외한다. 변경된 구현·검증·문서 파일만 origin/master에 전달한다.
+
+## 3단계 추가 기록: 구현·실검증 완료
+
+확정된 전송본으로 프로젝트 생성 POST와 제작 시작 GET을 별도로 보내고, 같은 영상 채널·현재 task ID의 완료 신호와 `videostate` 일치를 확인하는 기능을 구현했다. **시안 준비는 `draft_ready`**다. 기업 에셋 검사·즐겨찾기 교체·저장·자동 브라우저 이동은 아직 수행하지 않으며 `ready_for_editor`로 표시하지 않는다.
+
+### 구현 위치와 사용자 흐름
+
+| 위치 | 책임 |
+| --- | --- |
+| `backend/infox/client.py` | 생성 POST·제작 시작 GET은 `_json_once()`로 각 1회만 전송. 401·429·5xx·타임아웃도 자동 재전송하지 않음. `render_logs()`는 조회 전용 |
+| `backend/infox/manager.py` | 인증, 두 단계 의도/접수 CAS, SSE 선구독·이벤트 버퍼, 백엔드 추적·재연결·종료·재개 |
+| `backend/infox/tracking.py` | 현재 영상/작업 이벤트 선택, 오류 우선 처리, 대본·장면·음성·자막 검증 |
+| `backend/infox/run_models.py`, `store.py` | 기존 레코드에 기본값으로 호환되는 Tracking/DraftCheck, 제한된 stage CAS 갱신, 복구 대상 열거 |
+| `backend/app.py` | 서버 lifespan의 복구/종료, 보호된 시작 API, 실행 조회의 `tracking_active` |
+| `frontend/src/App.vue`, `api.ts`, `types.ts` | 확정본 제작 시작, 실행 ID GET 폴링, 단계/원인 표시, 수동 편집 링크 |
+| `tests/test_infox_generation.py` | 한 번만 전송·불명확한 접수·복구·이벤트/데이터 검증·CAS 경합·API 가드 |
+| `tests/infox_generation_live.py`, `phase3-live-verification.json` | 단일 실제 실행과 식별자/자격/URL을 제거한 관찰 근거 |
+
+기존 **InfoX 전송본 확정**은 계속 로컬 저장만 한다. 이후 **확정본으로 InfoX 제작 시작**을 명시적으로 눌러 외부 제작을 시작한다. 이후 편집본이 달라도 저장된 스냅샷을 덮어쓰지 않으며 그 차이를 표시한다. 기존 최신 편집 저장·revision 충돌·한글 조합·검토 확인·생성 진단 보존 정책을 유지했다.
+
+- `POST /api/infox-runs/{run_id}/start`: 202, 기존 실행 전체와 `tracking_active`를 반환한다. 긴 완료 추적을 HTTP 응답에 매달지 않는다. 같은 실행의 중복 요청은 같은 백엔드 태스크로 합친다.
+- `GET /api/infox-runs/{run_id}`와 작업별 최신 실행 GET: 현재 단계·접수 상태·영상/작업 ID·추적 요약·준비 확인·수동 `editor_url`을 반환한다. 화면 재로드는 GET만 수행한다.
+- 시작 응답이 유실되면 화면은 같은 실행 ID를 조회한다. POST를 자동 반복하지 않는다. 로컬 가드에서 명확히 거절한 403만 기존 세션 복구 정책을 적용한다.
+- 수동 링크는 고정 InfoX 호스트의 `/studio/library/videos/{video_id}?chatboxView=script`이며 `taskpopup` 없이 새 탭으로 사용자가 직접 연다. 자동 이동하지 않는다.
+
+### 영속화와 재개 경계
+
+1. 인증 후 `begin_request(project)`를 커밋하고 스냅샷의 `creation_body()`를 한 번 전송한다. 영상 ID를 `record_outcome(..., accepted, expected_version=...)`으로 저장한다.
+2. 해당 영상의 접근을 조회로 확인하고 SSE connection이 확인된 뒤 `begin_request(generation)`을 커밋한다. 제작 시작 GET을 한 번 전송하고 task ID를 별도로 저장한다. 응답보다 빠른 이벤트는 메모리 큐에서 기다린다.
+3. 현재 task의 명시적 실패/오류는 `failed`, 완료 신호는 `checking_draft`다. 일치하는 결과까지 확인되면 `draft_ready`로 전이한다. `progress=100`, connection, can_edit, 시간 경과는 완료 근거가 아니다.
+4. 외부 응답이 불명확하면 receipt는 `unknown`이다. 프로세스 중단으로 남은 `intent_recorded`도 재전송하지 않는다. 영상 ID가 있으면 동일 영상 상태·이력을 먼저 읽는다. 영상 ID가 없거나 이력에서 task 대응을 입증할 수 없으면 `needs_attention`과 접수 확인 불가 사유를 남긴다. 임의 ID 추정·새 프로젝트 생성·제작 재시작은 없다.
+5. 백엔드 시작 시 진행 중 기록을 복원해 조회/추적만 재개한다. 명확히 프로젝트만 접수된 경우 자동 제작 시작은 하지 않고 사용자의 기존 실행 확인 요청에서 미전송 제작 단계만 진행한다. `needs_attention`은 자동 반복하지 않는다.
+6. 다른 관리자의 확인이 버전을 올리는 동안 외부 요청이 성공한 경우, 원래 receipt의 `intent_at`이 같은지 검증하고 **로컬 결과 저장 CAS만** 제한적으로 다시 시도한다. 외부 요청은 반복하지 않는다. 디스크 자체가 실패하면 남은 intent에서 수동 접수 확인이 필요하다.
+
+일반 추적은 600초, SSE 읽기는 기존 45초, 재연결 대기는 2초다. 완료 후 준비 재조회는 기본 10회/2초 간격이며 HTTP 읽기의 기존 제한 재시도도 적용된다. 성공 근거가 부족하면 `needs_attention`으로 끝난다. 준비 검증은 장면 수·순서와 `voiceover.content`의 정확한 일치, 음성 bucket/filename·양의 audio_duration·설정 음성/제공자/속도, 비어 있지 않고 순서가 맞는 `segment_captions`의 유효 시간과 공백을 제외한 본문 일치를 요구한다. 기존 `captions=null`은 완료를 막지 않는다.
+
+### 실제 단일 실행에서 확인한 계약
+
+**2026-11-02 11:24:00 한국 시간**에 `draft_ready`를 확인했다. 실제 요청은 백엔드 실행 관리자용 명시적 검증 CLI로 수행했고, 화면 연결은 별도의 실제 로컬 API/브라우저 검증으로 확인했다. 시장 뉴스 대신 검토한 통합 검증용 2장면 대본을 사용했으며, 원래 compressed.txt와 다른 저장 편집본 revision 1을 확정했다. 이후 동일 실행의 대본·영상 ID·task ID를 끝까지 연결했다. 에셋 자동 대체 설정은 false다.
+
+- 프로젝트 생성 응답에서 영상 ID, 별도 제작 시작 응답에서 `message="generate_type_text"`와 task ID를 확보했다. 두 receipt 모두 accepted이며 스냅샷은 바뀌지 않았다.
+- `infox:{현재 video_id}` 채널의 connection 뒤 **작업 메시지가 최상위 JSON 객체로 직접** 도착했다. 선택 필드는 `id`, `status`(null), `content`(문자열), `additional_kwargs`다. 본문/식별자/파일 URL은 근거 파일에 복사하지 않았다.
+- 현재 task와 일치하는 `additional_kwargs.taskid`를 확인했다. 진행 시 `task_status="processing"`, 마지막에 **`task_status="completed", progress=100, error` 거짓 값**을 관찰했다. 초기 일부 메시지는 task_status가 없었다. 처리 중 메시지는 내부 running으로 표시하고, 없는/미지 상태는 성공으로 해석하지 않는다.
+- 일치하는 작업 메시지 28건을 처리했다. 이 실제 실행에서는 연결 중단은 없었다. 중복·재연결·조기 완료·데이터 지연은 통제 테스트에서 확인했다.
+- 완료 직후 동일 영상 상태를 다시 읽어 영상 ID·2개 장면의 대본 순서/본문·지정 음성 파일/길이/설정·모든 segment_captions 준비와 텍스트 일치를 확인했다. 네 준비 확인값은 모두 true다.
+- **실제 실패 이벤트는 관찰하지 않았다.** `error`가 있는 완료 메시지의 실패 우선 처리, failed/error/cancelled 등 보수적 실패 처리는 통제된 이벤트로 검증했다. 실제 서비스의 모든 실패 상태명/오류 외피까지 확정한 것은 아니다.
+
+실제 ID는 Git 제외 `.runtime/infox-runs.sqlite3`와 `.runtime/infox-phase3-live.json`의 실행 연결로만 확인한다. 실제 영상 재생·최종 MP4 렌더링은 수행하지 않았다. `tests.infox_generation_live` 재실행은 기존 marker의 실행만 사용하며 완료된 근거 파일을 보존한다. **marker를 지우고 새 실행을 만들지 않는다.**
+
+### 남은 제약과 4단계 작업자의 진입점
+
+- 재연결에서 서버가 Last-Event-ID로 누락 이벤트를 재생하는지는 실제 검증되지 않았다. 완료 신호를 놓친 경우 결과가 준비돼 보여도 완료 처리하지 않는다. `video_render_logs`의 실제 완료/task 대응 계약도 미검증이므로 대체 완료 근거로 사용하지 않는다.
+- 접수 여부를 모르는 프로젝트를 제목/시간만으로 연결하지 않는다. 원격 멱등 키·프로젝트 목록 조회·task 조회 계약이 없으므로 unknown을 자동 해소하거나 새로 생성하는 기능은 없다.
+- 실제 실패 이벤트, 장시간 인증 자연 만료, 서비스 장애, 실제 재연결은 이번 성공 실행으로 입증한 범위가 아니다. API 오류·복구는 통제 테스트 근거다.
+- **4단계 입력은 `RunRecord.stage == 'draft_ready'`, `tracking.completion_seen == true`, `tracking.draft.ready == true`인 실행**이다. snapshot/video_id/task_id는 그대로 유지한다. `video_state(video_id)`로 최신 데이터를 새로 읽고 §8의 실제 배정 참조와 검색 메타데이터를 대조하는 검사기를 추가한다.
+- 4단계는 `auditing_assets`와 검사 결과용 엄격한 모델/CAS를 추가해야 한다. 현재 `store.track()`는 제작 단계만 허용하므로 임의 JSON 갱신이나 snapshot 변경으로 우회하지 않는다. 자동 대체 설정이 true여도 아직 교체·저장하지 않으며, `draft_ready`를 `ready_for_editor`로 바꾸지 않는다.
+- 에셋 목록에서 기업명 검출·출처 예외·검사 불가를 먼저 구분한다. 즐겨찾기 조회/교체/저장과 자동 편집기 이동은 각각 후속 단계에서 연결한다.
+
+### 3단계 검증 결과
+
+- 전체 백엔드: **487 passed**, 기존 의존성 deprecation 경고 3개. 위 PSModulePath 설정으로 런처 테스트도 포함했다. InfoX DB 복구 실패가 기존 대본 앱의 기동까지 막지 않는 회귀도 포함한다.
+- 프런트엔드: **60 passed**, vue-tsc 타입 검사·Vite 프로덕션 빌드 성공.
+- 실제 Edge Chromium + 로컬 FastAPI: 저장/검토 확인·스냅샷 불변·단일 제작 시작·작업 완료/준비 확인·수동 링크·재로드 후 POST 미반복·390/1440px 레이아웃 성공. InfoX 응답은 통제 클라이언트이며 외부 브라우저 요청은 0회다.
+- 외부 실제 검증은 위 단일 실행으로만 수행했다. CLI 재실행/마지막 확인도 같은 `.runtime` marker와 실행 ID를 사용한다.
+- 독립 리뷰: Critical 0, Important 1(동시 접수 확인 중 성공 ID 저장 CAS 충돌)을 재현한 실패 테스트 후 로컬 CAS 재저장으로 수정했다. 배치 이벤트의 완료/실패 우선 선택과 완료 후 인증 오류의 구분도 각각 재현 테스트 후 수정했다.
+
+```powershell
+.venv/Scripts/python.exe -m pytest -q
+.tools/node/node.exe frontend/node_modules/vitest/vitest.mjs run --root frontend
+.tools/node/node.exe frontend/node_modules/vue-tsc/bin/vue-tsc.js -b frontend/tsconfig.json
+.tools/node/node.exe frontend/node_modules/vite/bin/vite.js build frontend
+.venv/Scripts/python.exe -m tests.infox_runs_browser_smoke
+# 명시적 실제 검증: 기존 marker 실행만 사용. 새 프로젝트를 만들기 위해 marker를 삭제하지 않는다.
+.venv/Scripts/python.exe -m tests.infox_generation_live
+```
+
+기존 README·scripts/launch.ps1·toggle.cmd·기존 및 검증 outputs는 이번 커밋에서 제외한다. 자격·쿠키·서명 URL·원본 SSE/편집 JSON·실제 영상/작업 ID는 커밋하지 않는다.
