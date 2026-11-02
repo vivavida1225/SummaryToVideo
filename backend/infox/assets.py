@@ -197,7 +197,7 @@ def audit_assets(state: dict, *, template_id: int, run_id: str, video_id: str,
                 if not isinstance(props, dict):
                     issue('unsupported_layer', si, lid)
                     continue
-                if kind not in ('ImageLayer', 'VideoLayer'):
+                if kind not in ('ImageLayer', 'VideoLayer', 'MediaLayer'):
                     issue('unsupported_layer', si, lid)
                     continue
                 marker = props.get('aigeneratable')
@@ -215,6 +215,9 @@ def audit_assets(state: dict, *, template_id: int, run_id: str, video_id: str,
                 if not isinstance(files, list):
                     issue('invalid_bundle', si, lid)
                     continue
+                if kind == 'MediaLayer' and not files:
+                    issue('invalid_bundle', si, lid)
+                    continue
                 if kind == 'VideoLayer' and files:
                     issue('invalid_bundle', si, lid)
                     items.append(AssetItem(scene_index=si, scene_id=scene_id, layer_id=lid, item_index=None,
@@ -229,7 +232,11 @@ def audit_assets(state: dict, *, template_id: int, run_id: str, video_id: str,
                     if not isinstance(obj, dict):
                         issue('invalid_media', si, lid)
                         continue
-                    ref = _reference(obj, 'image' if files or kind == 'ImageLayer' else 'video')
+                    if files and (obj.get('media_type') not in (None, 'image', 'video') or
+                                  (kind == 'ImageLayer' and obj.get('media_type') == 'video')):
+                        issue('invalid_bundle', si, lid)
+                        continue
+                    ref = _reference(obj, 'video' if kind == 'VideoLayer' or obj.get('media_type') == 'video' else 'image')
                     valid_ref = bool(ref.bucket and ref.filename and (ref.kind == 'image' or ref.segment))
                     exempt = valid_ref and scene_id and any(
                         proof.run_id == run_id and proof.video_id == video_id and proof.scene_index == si

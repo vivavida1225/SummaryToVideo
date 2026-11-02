@@ -1,8 +1,8 @@
-# InfoX 1·2·3·4단계 완료 및 5단계 인계
+# InfoX 1·2·3·4·5단계 완료 및 6단계 인계
 
 작성일: 2026-11-02 (한국 시간). 프로젝트: `C:\WORKS\SummaryToVideo`, 브랜치: `master`.
 
-현재는 **1·2·3·4단계 완료**다. 아래 기존 단계의 기록은 당시 범위이며, 문서 마지막의 **4단계 구현·실검증·5단계 진입점**이 현재 기준이다. [2단계 실행 문서](phase2-runs.md)의 스냅샷·CAS 계약과 3단계의 실제 완료 이벤트 검증도 계속 적용한다.
+현재는 **1·2·3·4·5단계 완료**다. 아래 기존 단계의 기록은 당시 범위이며, 문서 마지막의 **5단계 구현·실검증·6단계 진입점**이 현재 기준이다. [2단계 실행 문서](phase2-runs.md)의 스냅샷·CAS 계약과 3단계의 실제 완료 이벤트 검증도 계속 적용한다.
 
 ## 1단계 완료 기록
 
@@ -303,3 +303,86 @@ SQLite `BEGIN IMMEDIATE` 안에서 실행과 intent 별칭을 함께 커밋한�
 ```
 
 기존 README·scripts/launch.ps1·toggle.cmd·outputs와 원본 자격/DB는 보존하고 이번 커밋에서 제외한다. 3단계 실제 이벤트 근거도 그대로 보존한다.
+
+## 5단계 추가 기록: 즐겨찾기 선택·로컬 교체 계획 완료
+
+즐겨찾기 구간을 기술 조건으로 선택해 실행에 고정하고, 실제 서버 저장 전에 로컬 JSON 변환과 전체 데이터 보존을 검증한다. **영상 생성·제작 재시작·외부 배치 저장·자동 편집기 이동은 수행하지 않았다.** `replacement_planned`는 서버에 적용됐다는 뜻이 아니다. 화면에도 서버 미저장을 표시한다.
+
+### 구현과 상태/API
+
+| 파일 | 책임 |
+| --- | --- |
+| `backend/infox/plan_models.py` | URL 없는 후보·선택 정책·조회 출처·불변 배치별 선택·보존 확인·계획 모델 |
+| `backend/infox/favorites.py` | 전체 페이지 검증, 구간별 후보 보존, 사용 가능한 첫 후보 선택, 고정 후보 재확인 |
+| `backend/infox/client.py` | 기존 favorites-only 조회와 자격을 분리한 제한된 구간 파일 읽기 |
+| `backend/infox/replacement.py` | 순수 로컬 변환, 사진/영상/혼합 묶음과 슬롯 시간, 독립 전체 보존 검증, URL 제외 지문 |
+| `backend/infox/planner.py` | 최신 대본/검사/버전 확인 → 선택 CAS 고정 → 변환/검증 → 계획 CAS |
+| `backend/infox/store.py`, `manager.py`, `run_models.py`, `assets.py` | 새 단계·기본값 호환, 자동 계획/재시작/재검사와 MediaLayer 개별 참조 검사 |
+| `backend/app.py`, `frontend/src/components/InfoXReplacementPlan.vue`, `App.vue`, `api.ts`, `types.ts` | 보호된 계획 API, 단계별 GET, 고정 구간/슬롯/검증 결과·미저장 표시 |
+| `tests/test_infox_favorites.py`, `test_infox_replacement.py`, `test_infox_plan_api.py` | 페이지·자격 경계·혼합 변환·시간·CAS·중단/고정 선택 회귀 |
+| `tests/infox_plan_live.py`, `phase5-live-verification.json` | 기존 실행의 읽기 전용 확인, 실제 후보 접근, 실제 구조 복사본의 통제된 로컬 변환 |
+
+- 새 제작/재검사에서 `auto_replace=true`이고 에셋 검사가 완전하면 5단계를 자동으로 잇는다. 같은 영상의 최신 `videostate`를 읽고 대본·음성·자막, 검사 당시 버전과 항목 전체를 재검증한다. 달라졌으면 source_changed/draft_changed로 보류한다.
+- 기존 완전한 검사에는 **즐겨찾기 교체 계획 만들기**, 이후 **고정한 교체 계획 다시 확인**을 제공한다. `POST /api/infox-runs/{run_id}/replacement-plan`은 없거나 빈 본문만 허용하며 202다. 클라이언트가 후보 ID나 JSON 변환/출처를 주입할 수 없다.
+- 진행 중은 `selecting_favorites`, 검증된 로컬 계획은 **`replacement_planned`/plan.state=ready**, 실패/불명확은 needs_attention이다. 검출 대상 없음은 plan.state=not_needed이며 assets_audited를 유지한다. 검출 대상이 있지만 auto_replace=false면 disabled로 선택을 생략한다.
+- 계획도 기존 실행 ID GET으로 복원한다. 응답 유실/새로고침은 POST 재실행 없이 조회한다. 재시작 시 selecting_favorites만 읽기 전용으로 재개하며, 저장한 후보가 있으면 그 후보만 확인한다.
+- DB에 source_version·source/result SHA-256 지문·검색 조건/페이지/시각·배치별 기존 참조/선택 후보·슬롯 프레임·검증값을 보관한다. **전체 원격 JSON/제안 JSON/서명 URL을 DB나 일반 로그에 저장하지 않는다.** 새 필드는 이전 레코드에 기본값으로 추가되며 스냅샷·외부 receipt는 그대로다.
+
+### 후보·페이지·파일 접근 계약
+
+1. 일반 영상 favorites-only 검색, search=반도체, relevance 순서, limit=50을 사용한다. 날짜 필터는 **의도적으로 생략**한다. 캡처의 2025-11-02를 고정하지 않으며 날짜 필터의 서버 의미를 새로 검증한 것은 아니다.
+2. total/skip/limit·누적 항목 수·빈 중간 페이지·변하는 total·중복 구간 ID를 검사하며 끝까지 읽는다. 최대 20페이지/1,000개다. 중간 오류/한계는 명시적으로 보류하고 첫 페이지만 완전한 결과로 간주하지 않는다.
+3. 후보는 구간 ID·원영상 ID·bucket·segment·thumbnail·frameIndex·timestamp·duration·해상도·MP4 형식을 가진 즐겨찾기 항목이다. 같은 원영상의 다른 구간을 합치지 않는다. 문자열 제목에 기업명이 있거나 반도체라는 단어가 없어도 탈락시키지 않는다. 추가 시각 검수를 요구하지 않는다.
+4. 현재 정책은 **사용 가능한 첫 구간 하나를 모든 대상에 재사용**한다. 무작위 선택/자동 순환은 없다. 30fps에서 한 프레임도 없는 후보는 사용 불가로 분리하고 다음 후보를 확인한다. 파일 확인은 최대 20후보다.
+5. 구간 접근은 실제 확인한 `https://kr.object.iwinv.kr/{bucket}/{segment}`의 정확한 파일 경로만 허용한다. 새 전용 HTTP 클라이언트로 Range bytes=0-31을 읽어 HTTP 상태·콘텐츠 종류·MP4 ftyp 표식을 확인한다. API Bearer·장치 토큰·쿠키를 전달하지 않고 리다이렉트/다른 호스트/사용자 정보/다른 파일 경로를 거절한다. 실제 전체 재생/코덱 검사는 6단계다.
+6. 후보를 고른 뒤 **freeze_choices(expected_version)**를 커밋하고 나서 변환한다. 선택이 고정된 뒤 접근 불가/목록 변경/변환 실패가 나도 다른 구간으로 자동 변경하지 않는다. 새 조회에서 동일 후보의 안정 참조와 메타데이터를 확인하고 서명 URL만 메모리에 갱신한다. 선택 전 중단으로 아직 고정 기록이 없으면 다시 전체 후보를 조사할 수 있다.
+7. 사용자 영상 uservideo의 비어 있지 않은 응답과 교체 스키마는 미검증이므로 현재 선택 소스에 합치지 않는다. 지원하지 않는 source는 unsupported_uservideo다. 일반 검색/새 즐겨찾기 등록으로 우회하지 않는다.
+
+### 로컬 변환과 전체 보존
+
+현재 편집기 JS의 module 12764(hY/Qg)에서 ImageLayer/MediaLayer 프레임 배분을 확인했다. 근거는 `20700-31e582d53acc3cba.js`, `20478-9fbb80a4f22bb5aa.js` 및 `page-a6743b35f70d7639.js`의 미디어 변환 코드와 사용자 `replace3`의 MediaLayer 저장 구조다. 소스는 검증 중 읽어 Git 제외 `.runtime/infox-source`에만 보관했다. HTML/쿠키/계정 값은 산출물에 복사하지 않았다.
+
+- 현재 변환 계약은 **30fps와 명시적 scene.durationInFrames**다. 프레임이 없으면 duration만 반올림해 추정하지 않는다. 편집기의 추가 패딩/오프셋 계약까지 검증하지 않은 장면은 unsupported_timing으로 보류한다.
+- 단일 사진·영상은 VideoLayer로 바꾸고 image_files를 비운다. 여러 항목의 묶음은 MediaLayer와 image_files를 유지하며 **문제 항목만 같은 위치에서 영상으로 바꾼다.** 정상 사진/영상의 필드는 보존하고 원래 암묵적 슬롯 프레임만 durationInFrames로 명시한다. 항목 개수·순서·시작 경계를 유지한다. ceil 배분으로 마지막 슬롯이 장면 끝을 넘는 기존 경계도 그대로 보존한다.
+- MediaLayer의 `media_type="video"` 항목은 영상, 그 외 지원한 사진 항목은 사진으로 검사한다. 이 구조도 4단계 검사기에 연결했으며, VideoLayer에 모순되는 사진 배열이 남는 경우는 계속 확인 불가다.
+- 새 영상 미디어는 기존 객체에 몇 필드만 덧씌우지 않고 동일 후보의 id/videoId/bucket/segment/filename/frameIndex/timestamp/thumbnail/해상도/제목/길이로 구성한다. filename=segment, filename_resized=thumbnail이며 기존 사진/영상의 참조·설명·미리보기는 제거한다. 현재 조회의 서명 URL은 같은 후보·파일 경로일 때만 메모리 제안본에 넣는다.
+- startFrameVideo=0, endFrameVideo=min(구간 파일 프레임, 원래 슬롯 프레임)이다. 원영상 timestamp를 구간 파일 재생 시작에 다시 더하지 않는다. durationInFrames는 원래 슬롯 폭, muted=true/volume=0/playbackRate=1이다. 긴 구간은 슬롯까지 자르고 짧은 구간은 슬롯 폭을 유지하는 반복 계획이며 **실제 반복·공백·오디오 재생 확인은 6단계**다.
+- 레이어 ID·ROOT 연결·순서, props의 위치/크기/회전/효과, 대상 미디어/개별 항목의 크롭과 배치 속성을 보존한다. 지원하지 않는 대상 미디어 필드를 임의 삭제하지 않고 보류한다.
+- 독립 검증기는 변환기를 다시 호출해 비교하지 않는다. 전체 데이터에서 허용한 미디어/종류만 마스킹한 비교와 정상 항목·개별 교체 항목 레이아웃·프레임 배분·동일 후보의 모든 참조·이전 활성 파일 제거를 검사한다. 부모/자식에 오래된 filename/external_url 등이 추가되면 통과하지 않는다. 대본·음성·자막·다른 레이어·contextData 등 무관한 변경도 실패다.
+
+### 실제 검증과 적용 범위
+
+**2026-11-02 13:43:22 한국 시간**에 기존 3단계 영상·작업을 그대로 사용했다. 이 영상은 **기업명 검출 0, auto_replace=false**이므로 실제 실행은 **not_needed, 선택 0개**가 맞다. 실제 배치를 교체 대상으로 꾸미거나 새 영상을 생성하지 않았다.
+
+별도의 읽기 전용 검증에서는 실제 반도체 즐겨찾기 **12개/1페이지**의 일반 영상 스키마와 선택 구간 MP4 접근을 확인했다. 다시 조회해 같은 고정 후보를 재확인했다. 실제 편집 데이터의 **로컬 복사본에만** 검증용 메타데이터 hit 하나를 추가하고, 해당 실제 후보로 혼합 묶음 변환을 수행했다. 여섯 보존 검사(scope/정상 에셋/layout/timing/참조 일관성/이전 활성 참조 제거)가 모두 true였다. 이 복사본/제안본/가상 hit는 서버나 실제 실행의 asset_audit에 저장하지 않았다.
+
+원래 snapshot·영상/작업 ID·두 receipt·검증된 즐겨찾기 이력과 서버 updated_at은 그대로이며 **외부 영상 쓰기 0회**였다. 실제 적용·서버 저장·새로고침 후 적용 유지·편집기 재생은 입증하지 않았다. 실제 ID·파일명·계정·서명 URL은 `phase5-live-verification.json`에서 제거했다. uservideo 비어 있지 않은 응답, 페이지 2 이후, 실패/혼합/짧은 구간의 경계는 통제 테스트 근거이며 이번 실계정의 관찰과 구분한다.
+
+### 6단계 작업자의 진입점
+
+1. `replacement_plan.state=ready`, stage=replacement_planned의 실행을 사용한다. not_needed는 별도 무변경 검증 경로다. needs_attention/disabled/선택 중인 기록을 저장 완료로 처리하지 않는다.
+2. 같은 video_id의 최신 상태를 읽고 실제 source_version·`state_fingerprint()`·대본/준비·배치/선택 참조를 확인한다. 버전/지문이 달라졌으면 예전 전체 JSON을 덮어쓰지 않는다. 저장 요청의 updatedAt은 **이번 최신 원격 응답 값**을 사용한다.
+3. 전체 favorites-only 목록에서 고정한 후보를 `choose_favorite(...frozen=...)`로 다시 확인하고 URL을 메모리에 갱신한다. `apply_replacements(...ephemeral=...)`와 독립 보존 검증으로 전체 제안본을 재구성한다. URL 없는 result_fingerprint는 로컬 재구성의 동일성 근거이며, 저장 뒤 바뀐 서버 updated_at까지 그대로 같은 지문일 것이라고 가정하지 않는다.
+4. `update_video_context`의 video/contextData 매핑을 실제 원격 데이터에서 검증한다. **아직 저장용 클라이언트/receipt operation은 추가하지 않았다.** 저장 전에 typed begin_request intent를 커밋하고 expected_version 결과 저장, 응답 유실/충돌 후 서버 재조회 경계를 추가한다. start/recover에도 saving/verifying 단계를 명시적으로 라우팅해 생성 단계로 돌아가지 않게 한다.
+5. 저장 뒤 실제 사용 참조와 정상 에셋/대본/TTS/자막/배치/장면 길이를 재조회한다. 긴/짧은 구간과 혼합 묶음은 실제 편집기에서 재생해 검증한다. 성공 뒤에만 `FavoriteReplacement` saved_verified 이력을 새 배치·파일·구간과 묶어 CAS 저장한다. 계획 단계는 favorite_replacements를 추가하지 않았다.
+6. 현재 고정 선택을 자동 초기화하거나 다른 구간으로 대체하는 UI는 없다. 재검사로 원본이 달라졌거나 고정 후보가 사라지면 보류한다. 명시적인 새 선택 의도/재계획이 필요하다면 별도 CAS 계약과 사용자 동작으로 추가한다. 자동 브라우저 이동은 7단계다.
+
+### 5단계 검증·리뷰·전달
+
+- 5단계 전용 백엔드: **34 passed**(즐겨찾기/접근 13, 변환/보존 17, 계획 API/고정/복구 4).
+- 전체 백엔드 **551 passed**, 기존 의존성 경고 3개. 프런트엔드 **64 passed**, vue-tsc·Vite 빌드 성공.
+- 실제 로컬 API + Edge Chromium: 고정 후보 계획·혼합 로컬 변환·재확인 완료 후 새로고침/선택 유지·미저장 표시·390/1440px 레이아웃 성공. 외부 브라우저 요청/추가 생성/외부 배치 저장은 0회다.
+- 독립 리뷰: Critical 0 / Important 3. 개별 교체 항목의 크롭/잔여 참조 검증, 명시적 프레임 없는 장면의 잘못된 시간 추정, subframe 후보가 다음 사용 가능 후보를 막는 문제를 실패 테스트 후 수정했다.
+
+```powershell
+.venv/Scripts/python.exe -m pytest tests/test_infox_favorites.py tests/test_infox_replacement.py tests/test_infox_plan_api.py -q
+.venv/Scripts/python.exe -m pytest -q
+.tools/node/node.exe frontend/node_modules/vitest/vitest.mjs run --root frontend
+.tools/node/node.exe frontend/node_modules/vue-tsc/bin/vue-tsc.js -b frontend/tsconfig.json
+.tools/node/node.exe frontend/node_modules/vite/bin/vite.js build frontend
+.venv/Scripts/python.exe -m tests.infox_runs_browser_smoke
+# 기존 실행과 통제된 로컬 복사본만 사용. 영상 쓰기 금지.
+.venv/Scripts/python.exe -m tests.infox_plan_live
+```
+
+기존 README·scripts/launch.ps1·toggle.cmd·outputs 변경은 보존하고 이번 커밋에서 제외한다. 원본 HAR/편집기 코드/원격 JSON/자격/DB/서명 URL도 추가하지 않는다.

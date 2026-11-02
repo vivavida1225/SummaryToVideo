@@ -15,6 +15,8 @@ from .store import RunStore
 from .tracking import task_event, verify_draft
 from .asset_models import AssetAudit
 from .assets import audit_assets
+from .planner import prepare_plan
+from .plan_models import ReplacementPlan, PreservationChecks
 
 
 class RunManager:
@@ -27,8 +29,10 @@ class RunManager:
 
     async def start(self, run_id: str, *, recovery: bool = False) -> RunRecord:
         record = self.store.get(run_id)
-        if record.stage in ('draft_ready', 'auditing_assets', 'assets_audited', 'ready_for_editor', 'failed'):
+        if record.stage in ('draft_ready', 'auditing_assets', 'assets_audited', 'selecting_favorites', 'replacement_planned', 'ready_for_editor', 'failed'):
             return record
+        if record.asset_audit.state=='completed' and record.replacement_plan.state=='needs_attention':
+            return await self.plan(run_id)
         if record.asset_audit.state == 'needs_attention':
             return await self.audit(run_id)
         if run_id not in self.tasks or self.tasks[run_id].done():
@@ -46,6 +50,33 @@ class RunManager:
             self.tasks[run_id] = asyncio.create_task(self._audit_execute(claimed))
         return claimed
 
+    async def plan(self,run_id: str) -> RunRecord:
+        record=self.store.get(run_id)
+        if self.active(run_id):
+            if record.stage in ('assets_audited','selecting_favorites','replacement_planned'):
+                return record
+            raise RunError('audit_required')
+        claimed=self.store.begin_plan(run_id,expected_version=record.version)
+        self.tasks[run_id]=asyncio.create_task(self._plan_execute(claimed))
+        return claimed
+
+    async def _plan_execute(self,r):
+        try:
+            async with self.client_factory() as client:
+                await client.authenticate()
+                await prepare_plan(self.store,client,r)
+        except asyncio.CancelledError:
+            raise
+        except RunError:
+            return
+        except Exception as error:
+            with suppress(RunError):
+                code='authentication_required' if isinstance(error,InfoXError) and error.code in (
+                    'auth_expired','permission_denied','configuration_error') else 'read_failed'
+                self.store.record_plan(r.id,ReplacementPlan(**{**r.replacement_plan.model_dump(),
+                    'state':'needs_attention','error_code':code,'checks':PreservationChecks(),
+                    'result_fingerprint':None,'checked_at':now()}),expected_version=r.version)
+
     async def recover(self):
         try:
             records = self.store.resumable()
@@ -56,6 +87,8 @@ class RunManager:
         for record in records:
             if record.stage == 'auditing_assets':
                 await self.audit(record.id)
+            elif record.stage=='selecting_favorites':
+                await self.plan(record.id)
             else:
                 await self.start(record.id, recovery=True)
 
@@ -74,7 +107,10 @@ class RunManager:
             report = AssetAudit(state='needs_attention', audited_at=now(), error_code=code)
         except Exception:
             report = AssetAudit(state='needs_attention', audited_at=now(), error_code='read_failed')
-        return self.store.record_audit(r.id, report, expected_version=r.version)
+        recorded=self.store.record_audit(r.id, report, expected_version=r.version)
+        if recorded.asset_audit.state=='completed' and recorded.snapshot.settings.auto_replace:
+            return await prepare_plan(self.store,client,recorded)
+        return recorded
 
     async def _audit_execute(self, r):
         try:

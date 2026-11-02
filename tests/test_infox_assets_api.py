@@ -41,6 +41,10 @@ class ReadOnlyClient:
         assert video_id == 'video-1'
         self.reads += 1
         return copy.deepcopy(self.value)
+    async def search_favorites(self,**request):
+        from tests.test_infox_favorites import favorite
+        return {'items':[favorite()], 'total':1,'skip':request['skip'],'limit':request['limit']}
+    async def favorite_segment_available(self,raw): return True
 
 
 def test_audit_store_is_typed_cas_and_preserves_snapshot_and_receipts(tmp_path):
@@ -74,8 +78,8 @@ def test_audit_api_is_protected_read_only_and_resumes_existing_video(tmp_path):
             result = c.get(f'/api/infox-runs/{r.id}', headers=headers).json()
             if not result['tracking_active']: break
             time.sleep(.01)
-        assert result['stage'] == 'assets_audited'
-        assert result['asset_counts']['detected'] == 2 and fake.reads == 1
+        assert result['stage'] == 'replacement_planned'
+        assert result['asset_counts']['detected'] == 2 and fake.reads == 2
         assert result['snapshot']['text'] == r.snapshot.text
         assert c.post(endpoint, headers=headers, json={'favorite_replacements': []}).status_code == 422
     with client(tmp_path) as c:
@@ -114,7 +118,7 @@ def test_interrupted_audit_recovers_only_reads(tmp_path):
         restored = RunManager(RunStore(tmp_path), lambda: fake)
         await restored.recover()
         await restored.wait(r.id)
-        assert store.get(r.id).stage == 'assets_audited' and fake.reads == 1
+        assert store.get(r.id).stage == 'replacement_planned' and fake.reads == 2
         await restored.close()
     asyncio.run(scenario())
 

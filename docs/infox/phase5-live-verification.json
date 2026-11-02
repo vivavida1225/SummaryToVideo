@@ -1,0 +1,42 @@
+{
+  "verified_at_kst": "2026-11-02T13:43:22.949368+09:00",
+  "existing_phase3_run_reused": true,
+  "production_plan_state": "not_needed",
+  "production_detected_count": 0,
+  "production_selections": 0,
+  "auto_replace": false,
+  "favorites_total": 12,
+  "favorites_pages": 1,
+  "general_video_schema_verified": true,
+  "uservideo_nonempty_schema_verified": false,
+  "selected_segment_accessible": true,
+  "same_frozen_candidate_rechecked": true,
+  "controlled_local_copy_only": true,
+  "synthetic_metadata_hit_added": true,
+  "controlled_target_count": 1,
+  "controlled_checks": {
+    "scope_preserved": true,
+    "normal_assets_preserved": true,
+    "layout_preserved": true,
+    "timing_preserved": true,
+    "references_consistent": true,
+    "old_active_references_removed": true
+  },
+  "same_snapshot": true,
+  "same_video_and_task": true,
+  "same_receipts": true,
+  "server_version_unchanged": true,
+  "saved_favorite_history_unchanged": true,
+  "remote_video_writes": 0,
+  "operations": [
+    "authentication",
+    "video_state",
+    "authentication",
+    "video_state",
+    "favorites_search",
+    "bounded_segment_read",
+    "favorites_search",
+    "bounded_segment_read",
+    "video_state"
+  ]
+}

@@ -171,6 +171,7 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
             'run_not_found': 'InfoX 실행 기록을 찾을 수 없습니다.',
             'storage_error': 'InfoX 실행 기록을 읽거나 저장하지 못했습니다. 같은 요청으로 다시 확인하세요.',
             'draft_not_ready': '현재 작업의 완료 신호와 대본·음성·자막 준비를 확인한 뒤 에셋을 검사할 수 있습니다.',
+            'audit_required': '현재 영상의 기업 에셋 검사를 완료한 뒤 교체 계획을 만들 수 있습니다.',
         }
         return JSONResponse({'detail': messages.get(exc.code, 'InfoX 실행 기록과 설정을 확인하세요.'),
                              'code': exc.code, 'run_id': exc.run_id}, status_code=exc.status_code)
@@ -255,6 +256,10 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
     @app.post('/api/infox-runs/{run_id}/audit', status_code=202)
     async def audit_infox_run(run_id: str, data: InfoXAuditInput | None = None):
         return infox_view(await infox_manager.audit(run_id))
+
+    @app.post('/api/infox-runs/{run_id}/replacement-plan', status_code=202)
+    async def plan_infox_replacements(run_id: str, data: InfoXAuditInput | None = None):
+        return infox_view(await infox_manager.plan(run_id))
 
     @app.post('/api/jobs/{job_id}/retry', status_code=202)
     async def retry_job(job_id: str, data: ModelInput | None = None):

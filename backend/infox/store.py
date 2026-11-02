@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from .run_models import Receipt, RunError, RunRecord, Tracking, now
 from .asset_models import AssetAudit
+from .plan_models import PreservationChecks, ReplacementPlan, ReplacementChoice, SearchEvidence
 
 
 class RunStore:
@@ -89,17 +90,62 @@ class RunStore:
         with self._transaction() as conn:
             return [record for row in conn.execute('SELECT record FROM runs')
                     if (record := self._decode(row)).stage not in
-                    ('prepared', 'draft_ready', 'assets_audited', 'ready_for_editor', 'failed', 'needs_attention')]
+                    ('prepared', 'draft_ready', 'assets_audited', 'replacement_planned', 'ready_for_editor', 'failed', 'needs_attention')]
+
+    def begin_plan(self, run_id: str, *, expected_version: int) -> RunRecord:
+        with self._edit(run_id, expected_version) as (record,data):
+            if (record.stage not in ('assets_audited','replacement_planned','selecting_favorites','needs_attention')
+                    or record.asset_audit.state!='completed' or record.requires_reconciliation
+                    or record.project.state!='accepted' or record.generation.state!='accepted'
+                    or not record.video_id or not record.task_id or not record.tracking.completion_seen
+                    or not record.tracking.draft.ready or record.tracking.task_status!='completed'):
+                raise RunError('audit_required')
+            data.update(stage='selecting_favorites',replacement_plan={**record.replacement_plan.model_dump(),
+                'state':'selecting','error_code':None,'checks':PreservationChecks().model_dump(),
+                'result_fingerprint':None,'checked_at':None})
+        return self.get(run_id)
+
+    def freeze_choices(self, run_id: str, choices: tuple[ReplacementChoice,...], *, source_fingerprint: str,
+                       source_version: str, evidence: SearchEvidence, expected_version: int) -> RunRecord:
+        with self._edit(run_id, expected_version) as (record,data):
+            if record.stage!='selecting_favorites' or record.replacement_plan.state not in ('selecting','selected'):
+                raise RunError('invalid_stage')
+            targets=tuple(item for item in record.asset_audit.items if item.verdict=='detected')
+            if not choices or tuple(choice.target for choice in choices)!=targets:
+                raise RunError('invalid_selection')
+            previous=record.replacement_plan
+            if previous.selections and (previous.selections!=choices or previous.source_fingerprint!=source_fingerprint
+                                        or previous.source_version!=source_version):
+                raise RunError('selection_conflict')
+            data['replacement_plan']=ReplacementPlan(state='selected',policy=previous.policy,
+                source_version=source_version,source_fingerprint=source_fingerprint,selections=choices,
+                search_evidence=evidence).model_dump()
+        return self.get(run_id)
+
+    def record_plan(self, run_id: str, plan: ReplacementPlan, *, expected_version: int) -> RunRecord:
+        if not isinstance(plan,ReplacementPlan) or plan.state not in ('ready','not_needed','disabled','needs_attention'):
+            raise RunError('invalid_plan',422)
+        with self._edit(run_id, expected_version) as (record,data):
+            if record.stage!='selecting_favorites' or record.replacement_plan.state not in ('selecting','selected'):
+                raise RunError('invalid_stage')
+            if plan.selections!=record.replacement_plan.selections:
+                raise RunError('selection_conflict')
+            data.update(stage='replacement_planned' if plan.state=='ready' else 'assets_audited'
+                        if plan.state in ('not_needed','disabled') else 'needs_attention',replacement_plan=plan.model_dump())
+        return self.get(run_id)
 
     def begin_audit(self, run_id: str, *, expected_version: int) -> RunRecord:
         with self._edit(run_id, expected_version) as (record, data):
-            if (record.stage not in ('draft_ready', 'auditing_assets', 'assets_audited', 'needs_attention')
+            if (record.stage not in ('draft_ready', 'auditing_assets', 'assets_audited', 'replacement_planned', 'needs_attention')
                     or record.requires_reconciliation or record.project.state != 'accepted'
                     or record.generation.state != 'accepted' or not record.video_id or not record.task_id
                     or not record.tracking.completion_seen or not record.tracking.draft.ready
                     or record.tracking.task_status != 'completed'):
                 raise RunError('draft_not_ready')
             data.update(stage='auditing_assets', asset_audit=AssetAudit(state='running').model_dump())
+            if record.replacement_plan.state!='not_started':
+                data['replacement_plan']={**record.replacement_plan.model_dump(),'state':'needs_attention',
+                    'error_code':'source_changed','checks':PreservationChecks().model_dump(),'result_fingerprint':None}
         return self.get(run_id)
 
     def record_audit(self, run_id: str, audit: AssetAudit, *, expected_version: int) -> RunRecord:
@@ -116,7 +162,7 @@ class RunStore:
         if stage not in ('prepared', 'project_created', 'generating', 'checking_draft', 'draft_ready', 'needs_attention', 'failed'):
             raise RunError('invalid_stage')
         with self._edit(run_id, expected_version) as (record, data):
-            if record.stage in ('draft_ready', 'auditing_assets', 'assets_audited', 'ready_for_editor', 'failed'):
+            if record.stage in ('draft_ready', 'auditing_assets', 'assets_audited', 'selecting_favorites', 'replacement_planned', 'ready_for_editor', 'failed'):
                 raise RunError('invalid_stage')
             if stage == 'prepared' and (record.project.state != 'not_sent' or record.generation.state != 'not_sent'):
                 raise RunError('invalid_stage')

@@ -86,6 +86,7 @@ export interface InfoXRun {
   tracking_active?: boolean
   asset_audit?: InfoXAssetAudit
   asset_counts?: Record<string, number>
+  replacement_plan?: InfoXReplacementPlan
   snapshot: {
     job_id: string
     revision: number
@@ -105,6 +106,19 @@ export interface InfoXRun {
     reconnects?: number
     draft?: { identity_matches: boolean; scenes_match: boolean; voices_ready: boolean; captions_ready: boolean }
   }
+}
+
+export interface InfoXReplacementPlan {
+  state: string
+  error_code?: string | null
+  search_evidence?: { total: number; pages: number } | null
+  checks?: Record<string, boolean>
+  selections: Array<{
+    target: { scene_index: number; layer_id: string; item_index: number | null }
+    slot_frames: number
+    candidate: { id: string; title: string; video_id: string; bucket: string; segment: string;
+      frame_index: number; timestamp: number; duration: number }
+  }>
 }
 
 export interface InfoXAssetAudit {

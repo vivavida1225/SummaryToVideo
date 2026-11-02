@@ -46,6 +46,10 @@ export async function bootstrapSession(): Promise<SessionInfo> {
 }
 
 export const api = {
+  planInfox(id: string): Promise<InfoXRun> {
+    return request(`/api/infox-runs/${encodeURIComponent(id)}/replacement-plan`, { method: 'POST' })
+  },
+
   auditInfox(id: string): Promise<InfoXRun> {
     return request(`/api/infox-runs/${encodeURIComponent(id)}/audit`, { method: 'POST' })
   },

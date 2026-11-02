@@ -24,8 +24,9 @@ def prepared(root):
 
 
 def draft(record):
-    return {'id': 'video-1', 'updated_at': '2026-11-02T01:00:00Z', 'can_edit': True, 'video': {'scenes': [
-        {'id': f'scene-{s.scene_index}', 'rootShape': {'layers': {'ROOT': {'child': ['media']},
+    return {'id': 'video-1', 'updated_at': '2026-11-02T01:00:00Z', 'can_edit': True, 'video': {'frameRate':30,'duration':len(record.snapshot.scenes)*2,'scenes': [
+        {'id': f'scene-{s.scene_index}', 'duration':2,'durationInFrames':60,'offset_durationInFrames':s.scene_index*60,
+         'rootShape': {'layers': {'ROOT': {'child': ['media']},
          'media': {'type': {'resolvedName': 'ImageLayer'}, 'child': [], 'props': {
              'aigeneratable': {'auto_select': True}, 'media': {'bucket': 'images', 'filename': 'photo.jpg', 'title': '중립 설비'}}}}},
          'voiceover': {'content': s.text, 'filename': 'voice.wav', 'bucket': 'voice',

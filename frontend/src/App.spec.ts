@@ -81,6 +81,26 @@ async function finishBootstrap() {
 }
 
 describe('App', () => {
+  it('교체 계획 응답 유실은 POST를 반복하지 않고 고정 후보를 조회한다', async () => {
+    sessionStorage.setItem('market-compressor.job-id', 'job-1')
+    const run = { ...makeInfoxRun(), stage: 'assets_audited', asset_audit: { state: 'completed', items: [], issues: [] } }
+    let posts = 0
+    installBootstrapFetch((path) => {
+      if (path.endsWith('/replacement-plan')) { posts++; throw new TypeError('Failed to fetch') }
+      if (path === `/api/infox-runs/${run.id}`) return jsonResponse({ ...run, stage: 'replacement_planned', tracking_active: false,
+        replacement_plan: { state: 'ready', selections: [], checks: { scope_preserved: true, normal_assets_preserved: true,
+          layout_preserved: true, timing_preserved: true, references_consistent: true, old_active_references_removed: true } } })
+      if (path.endsWith('/infox-runs')) return jsonResponse({ run })
+      if (path === '/api/jobs/job-1') return jsonResponse(makeJob({ state: 'completed', compressed: '원본', revision: 0 }))
+      throw new Error(`unexpected ${path}`)
+    })
+    render(App)
+    const button = await screen.findByRole('button', { name: '즐겨찾기 교체 계획 만들기' })
+    await waitFor(() => expect(button).toBeEnabled())
+    await fireEvent.click(button)
+    await screen.findByText('교체 계획 검증 완료 · 서버에는 저장하지 않았습니다.', {}, { timeout: 4000 })
+    expect(posts).toBe(1)
+  })
   it('기존 시안의 에셋 검사 응답 유실은 실행 조회로 복구하고 검사 결과를 표시한다', async () => {
     sessionStorage.setItem('market-compressor.job-id', 'job-1')
     const run = { ...makeInfoxRun(), stage: 'draft_ready', tracking: { completion_seen: true },

@@ -9,6 +9,7 @@ import re
 import ssl
 from datetime import date
 from typing import AsyncIterator
+from urllib.parse import unquote, urlsplit
 
 import httpx
 import truststore
@@ -37,11 +38,13 @@ def _identifier(value: int | str) -> str:
 
 class InfoXClient:
     def __init__(self, credentials: InfoXCredentials, *, transport: httpx.AsyncBaseTransport | None = None,
+                 media_transport: httpx.AsyncBaseTransport | None = None,
                  stream_auth: str = 'cookie', timeout: float = 30, stream_read_timeout: float = 45,
                  retry_delay: float = 0.25):
         if stream_auth not in ('cookie', 'bearer') or min(timeout, stream_read_timeout) <= 0 or retry_delay < 0:
             raise InfoXError('configuration_error')
         self._credentials = credentials
+        self._media_transport = media_transport
         self._token = credentials.access_token
         if self._token and not _header_value(self._token):
             raise InfoXError('configuration_error')
@@ -202,6 +205,35 @@ class InfoXClient:
                 or any(not isinstance(item, dict) or item.get('is_favorite') is not True for item in result['items'])):
             raise InfoXError('invalid_response')
         return result
+
+    async def favorite_segment_available(self, item: dict) -> bool:
+        """Read at most 32 decoded bytes from the exact selected clip, without credentials.
+
+        The current favorites response uses this single object-storage host.
+        Never follow redirects or send the API bearer/device/cookies there.
+        """
+        try:
+            url = item['segment_url_presigned']
+            parsed = urlsplit(url)
+            expected = '/' + item['bucket'] + '/' + item['segment']
+            if (parsed.scheme != 'https' or parsed.hostname != 'kr.object.iwinv.kr'
+                    or parsed.port not in (None, 443) or parsed.username or parsed.password
+                    or parsed.fragment or unquote(parsed.path) != expected
+                    or any(part in ('.', '..') for part in unquote(parsed.path).split('/'))):
+                return False
+            async with httpx.AsyncClient(timeout=10, follow_redirects=False,
+                    verify=truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT), transport=self._media_transport) as media:
+                async with media.stream('GET', url, headers={'Range': 'bytes=0-31',
+                        'Accept': 'video/mp4', 'Accept-Encoding': 'identity'}) as response:
+                    if (response.status_code not in (200, 206) or
+                            response.headers.get('content-type', '').split(';')[0].lower() not in ('video/mp4', 'application/octet-stream')
+                            or response.headers.get('content-encoding', 'identity') != 'identity'):
+                        return False
+                    async for chunk in response.aiter_bytes(chunk_size=32):
+                        return len(chunk) >= 8 and chunk[4:8] == b'ftyp'
+        except (KeyError, TypeError, ValueError, httpx.HTTPError):
+            return False
+        return False
 
     async def events(self, video_id: int | str, *, last_event_id: str = '',
                      max_event_bytes: int = 1024 * 1024) -> AsyncIterator[SSEEvent]:

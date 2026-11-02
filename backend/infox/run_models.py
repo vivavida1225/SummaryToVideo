@@ -7,6 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from .asset_models import AssetAudit, FavoriteReplacement
+from .plan_models import ReplacementPlan
 
 
 def now() -> str:
@@ -88,7 +89,7 @@ class Receipt(StrictModel):
 
 
 RunStage = Literal['prepared', 'creating_project', 'project_created', 'starting_generation', 'generating',
-    'checking_draft', 'draft_ready', 'auditing_assets', 'assets_audited', 'selecting_favorites', 'replacing_assets', 'saving_assets',
+    'checking_draft', 'draft_ready', 'auditing_assets', 'assets_audited', 'selecting_favorites', 'replacement_planned', 'replacing_assets', 'saving_assets',
     'verifying_assets', 'ready_for_editor', 'needs_attention', 'failed']
 
 
@@ -132,6 +133,7 @@ class RunRecord(StrictModel):
     tracking: Tracking = Field(default_factory=Tracking)
     asset_audit: AssetAudit = Field(default_factory=AssetAudit)
     favorite_replacements: tuple[FavoriteReplacement, ...] = ()
+    replacement_plan: ReplacementPlan = Field(default_factory=ReplacementPlan)
 
     @property
     def requires_reconciliation(self) -> bool:
