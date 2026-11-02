@@ -136,6 +136,8 @@ class RunRecord(StrictModel):
     favorite_replacements: tuple[FavoriteReplacement, ...] = ()
     replacement_plan: ReplacementPlan = Field(default_factory=ReplacementPlan)
     asset_save: AssetSave = Field(default_factory=AssetSave)
+    # Legacy records and explicit audit/plan operations are read-only by default.
+    continuation: Literal['manual', 'automatic'] = 'manual'
 
     @property
     def requires_reconciliation(self) -> bool:

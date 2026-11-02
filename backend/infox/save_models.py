@@ -28,6 +28,9 @@ class AssetSave(AuditModel):
     verified_version: str | None = None
     verified_fingerprint: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
     checked_at: str | None = None
+    write_error_code: Literal['version_conflict', 'authentication_required', 'save_rejected', 'save_unconfirmed'] | None = None
+    write_status: int | None = Field(default=None, ge=100, le=599)
+    read_error_code: Literal['authentication_required', 'read_failed', 'verification_failed'] | None = None
     error_code: Literal['source_changed', 'draft_changed', 'selection_unavailable', 'context_invalid',
         'transform_invalid', 'version_conflict', 'save_rejected', 'save_unconfirmed',
         'verification_failed', 'authentication_required', 'read_failed'] | None = None

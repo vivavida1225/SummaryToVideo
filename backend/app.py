@@ -21,6 +21,7 @@ from .infox.store import RunStore
 from .infox.manager import RunManager
 from .infox.client import InfoXClient
 from .infox.config import InfoXCredentials
+from .infox.editor import EditorClaim, EditorUpdate
 from .models import MODELS, model_candidates
 from .myasset import MyassetError, fetch_myasset_source
 from .storage import list_sources, source_path
@@ -252,6 +253,18 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
     @app.post('/api/infox-runs/{run_id}/start', status_code=202)
     async def start_infox_run(run_id: str):
         return infox_view(await infox_manager.start(run_id))
+
+    @app.get('/api/infox-runs/{run_id}/editor-attempts')
+    async def latest_editor_attempt(run_id: str):
+        return {'attempt': infox_runs.store.latest_editor(run_id)}
+
+    @app.post('/api/infox-runs/{run_id}/editor-attempts')
+    async def claim_editor_attempt(run_id: str, data: EditorClaim):
+        return infox_runs.store.claim_editor(run_id, data)
+
+    @app.post('/api/infox-runs/{run_id}/editor-attempts/{attempt_id}')
+    async def update_editor_attempt(run_id: str, attempt_id: str, data: EditorUpdate):
+        return infox_runs.store.update_editor(run_id, attempt_id, data)
 
     @app.post('/api/infox-runs/{run_id}/audit', status_code=202)
     async def audit_infox_run(run_id: str, data: InfoXAuditInput | None = None):

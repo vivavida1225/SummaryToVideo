@@ -31,8 +31,19 @@ class RunManager:
 
     async def start(self, run_id: str, *, recovery: bool = False) -> RunRecord:
         record = self.store.get(run_id)
+        if self.active(run_id):
+            return record
         if record.stage in SAVE_STAGES or record.asset_save.state not in ('not_started', 'saved_verified', 'unchanged_verified'):
             return await self.save(run_id)
+        if record.stage in ('ready_for_editor', 'failed'):
+            return record
+        if not recovery and record.continuation != 'automatic':
+            record = self.store.set_continuation(run_id, 'automatic', expected_version=record.version)
+        if record.continuation == 'automatic' and (record.stage in
+                ('draft_ready', 'auditing_assets', 'assets_audited', 'selecting_favorites', 'replacement_planned')
+                or (record.stage == 'needs_attention' and record.asset_audit.state != 'not_started')):
+            self.tasks[run_id] = asyncio.create_task(self._continue_assets(record))
+            return record
         if record.stage in ('draft_ready', 'auditing_assets', 'assets_audited', 'selecting_favorites', 'replacement_planned', 'ready_for_editor', 'failed'):
             return record
         if record.asset_audit.state=='completed' and record.replacement_plan.state=='needs_attention':
@@ -71,10 +82,34 @@ class RunManager:
         audited = await self._audit_with_client(client, r)
         # New automatic runs continue through storage. Explicit audit/plan APIs
         # remain read-only; existing plans have a dedicated save action.
-        if audited.replacement_plan.state in ('ready', 'not_needed'):
+        return await self._save_automatic(client, audited)
+
+    async def _save_automatic(self, client, audited):
+        if audited.continuation == 'automatic' and audited.replacement_plan.state in ('ready', 'not_needed'):
             claimed = self.store.begin_save(audited.id, expected_version=audited.version)
             return await save_plan(self.store, client, claimed)
         return audited
+
+    async def _continue_assets(self, r):
+        try:
+            async with self.client_factory() as client:
+                # Each read/save coordinator authenticates inside its diagnostic
+                # boundary, so auth failures retain the appropriate stage cause.
+                if r.replacement_plan.state in ('ready', 'not_needed'):
+                    await self._save_automatic(client, r)
+                elif r.asset_audit.state == 'completed':
+                    # Retain frozen selections; never return to project creation.
+                    planned = await prepare_plan(self.store, client, r)
+                    await self._save_automatic(client, planned)
+                else:
+                    await self._finish_assets(client, r)
+        except asyncio.CancelledError:
+            raise
+        except RunError:
+            return
+        except Exception:
+            # Durable boundary and intent survive; explicit retry re-enters here.
+            return
 
     async def audit(self, run_id: str) -> RunRecord:
         record = self.store.get(run_id)
@@ -82,6 +117,8 @@ class RunManager:
             if record.stage in ('draft_ready', 'auditing_assets', 'assets_audited'):
                 return record
             raise RunError('draft_not_ready')
+        if record.continuation != 'manual':
+            record = self.store.set_continuation(run_id, 'manual', expected_version=record.version)
         claimed = self.store.begin_audit(run_id, expected_version=record.version)
         if not self.active(run_id):
             self.tasks[run_id] = asyncio.create_task(self._audit_execute(claimed))
@@ -93,6 +130,8 @@ class RunManager:
             if record.stage in ('assets_audited','selecting_favorites','replacement_planned'):
                 return record
             raise RunError('audit_required')
+        if record.continuation != 'manual':
+            record = self.store.set_continuation(run_id, 'manual', expected_version=record.version)
         claimed=self.store.begin_plan(run_id,expected_version=record.version)
         self.tasks[run_id]=asyncio.create_task(self._plan_execute(claimed))
         return claimed
@@ -122,7 +161,9 @@ class RunManager:
             # Protected InfoX endpoints still report its explicit safe 503 error.
             return
         for record in records:
-            if record.stage in SAVE_STAGES:
+            if record.continuation == 'automatic':
+                await self.start(record.id, recovery=True)
+            elif record.stage in SAVE_STAGES:
                 await self.save(record.id)
             elif record.stage == 'auditing_assets':
                 await self.audit(record.id)

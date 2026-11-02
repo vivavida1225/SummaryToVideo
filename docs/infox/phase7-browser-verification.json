@@ -1,0 +1,56 @@
+{
+  "controlled_local_api_edge": [
+    {
+      "scenario": "normal",
+      "passed": true,
+      "editor_requests": 2,
+      "remote_writes": 0
+    },
+    {
+      "scenario": "duplicate",
+      "passed": true,
+      "editor_requests": 2,
+      "remote_writes": 0
+    },
+    {
+      "scenario": "blocked",
+      "passed": true,
+      "editor_requests": 1,
+      "remote_writes": 0
+    },
+    {
+      "scenario": "closed",
+      "passed": true,
+      "editor_requests": 1,
+      "remote_writes": 0
+    },
+    {
+      "scenario": "reload",
+      "passed": true,
+      "editor_requests": 1,
+      "remote_writes": 0
+    },
+    {
+      "scenario": "assignment_failed",
+      "passed": true,
+      "editor_requests": 1,
+      "remote_writes": 0
+    },
+    {
+      "scenario": "lost_ack",
+      "passed": true,
+      "editor_requests": 1,
+      "remote_writes": 0
+    },
+    {
+      "scenario": "backend_restart",
+      "passed": true,
+      "editor_requests": 2,
+      "remote_writes": 0
+    }
+  ],
+  "actual_infox_editor": false,
+  "actual_login_or_playback_verified": false,
+  "uncontrolled_external_network_requests": 0,
+  "editor_url_requests_intercepted": true
+}

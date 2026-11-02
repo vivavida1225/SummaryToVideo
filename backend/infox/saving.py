@@ -75,17 +75,18 @@ def _error_code(error):
     return 'read_failed'
 
 
-def _record_outcome(store, claimed, outcome, response_version=None):
+def _record_outcome(store, claimed, outcome, response_version=None, *, write_error_code=None, write_status=None):
     # Only retry local CAS, tied to this exact intent. Never repeat the HTTP.
     current = claimed
     for _ in range(3):
         if current.asset_save.intent_at != claimed.asset_save.intent_at:
             raise RunError('record_conflict')
-        if current.asset_save.state == 'saved_verified' or current.asset_save.receipt_state == 'accepted':
+        if current.asset_save.receipt_state == 'accepted':
             return current
         try:
             return store.record_save_outcome(current.id, outcome, response_version=response_version,
-                                             expected_version=current.version)
+                                             expected_version=current.version,
+                                             write_error_code=write_error_code, write_status=write_status)
         except RunError as error:
             if error.code != 'record_conflict':
                 raise
@@ -113,7 +114,7 @@ async def _verify_saved(store, client, r, failure=None):
     if matches:
         return store.finish_save(r.id, verified_version=version, fingerprint=fingerprint,
                                  url_fingerprint=url_fingerprint, expected_version=r.version)
-    code = failure or ('verification_failed' if r.asset_save.receipt_state == 'accepted'
+    code = r.asset_save.write_error_code or failure or ('verification_failed' if r.asset_save.receipt_state == 'accepted'
                        else 'save_rejected' if r.asset_save.receipt_state == 'rejected' else 'save_unconfirmed')
     return store.fail_save(r.id, code, expected_version=r.version)
 
@@ -158,9 +159,11 @@ async def save_plan(store, client, r):
             version = await client.save_video_context(r.video_id, body)
         except Exception as error:
             definite = isinstance(error, InfoXError) and error.status_code in (400, 401, 403, 404, 409, 422)
-            r = _record_outcome(store, r, 'rejected' if definite else 'unknown')
             failure = 'version_conflict' if isinstance(error, InfoXError) and error.status_code == 409 else (
+                'authentication_required' if isinstance(error, InfoXError) and error.status_code in (401, 403) else
                 'save_rejected' if definite else 'save_unconfirmed')
+            r = _record_outcome(store, r, 'rejected' if definite else 'unknown', write_error_code=failure,
+                                write_status=error.status_code if isinstance(error, InfoXError) else None)
         else:
             r = _record_outcome(store, r, 'accepted', version)
         if r.asset_save.state == 'saved_verified':
@@ -169,4 +172,6 @@ async def save_plan(store, client, r):
     except RunError:
         raise
     except Exception as error:
-        return store.fail_save(r.id, _error_code(error), expected_version=r.version)
+        code = _error_code(error)
+        return store.fail_save(r.id, code, expected_version=r.version,
+                               read_error_code=code if r.asset_save.receipt_state != 'not_sent' else None)

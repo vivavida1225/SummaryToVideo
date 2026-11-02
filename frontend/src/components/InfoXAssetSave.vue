@@ -29,6 +29,8 @@ const errors: Record<string, string> = {
     <h4>저장 및 적용 검증</h4>
     <p>{{ labels[save.state] ?? '저장 기록을 확인하세요.' }}</p>
     <p v-if="save.error_code">{{ errors[save.error_code] ?? '서버 적용 상태를 확인하세요.' }}</p>
+    <p v-if="save.write_error_code">최초 저장 요청 결과: {{ errors[save.write_error_code] }}<template v-if="save.write_status"> (HTTP {{ save.write_status }})</template></p>
+    <p v-if="save.read_error_code">후속 서버 조회 결과: {{ errors[save.read_error_code] }}</p>
     <p v-if="['intent_recorded', 'unknown'].includes(save.receipt_state) && save.state !== 'saved_verified'">저장을 재전송하지 않고 기존 영상의 적용 여부를 조회합니다.</p>
     <p v-if="save.state === 'saved_verified'">고정한 구간과 보존 항목을 서버에서 확인했습니다. 실제 편집기의 재생 확인은 별도입니다. 수동 링크에서 반복·잘림·소재 원음·TTS·자막을 확인하세요.</p>
     <p v-if="save.verified_version">검증한 서버 버전: {{ save.verified_version }}</p>

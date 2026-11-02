@@ -32,7 +32,10 @@ class SaveStoreMixin:
             # Claim a local check; this is NOT permission to replay a pending POST.
             data.update(stage='verifying_assets' if save.receipt_state != 'not_sent' else 'replacing_assets',
                         asset_save={**save.model_dump(), 'state': 'verifying' if save.receipt_state != 'not_sent'
-                                    else 'checking_source', 'error_code': save.error_code if save.receipt_state != 'not_sent' else None})
+                                    else 'checking_source', 'error_code': save.error_code if save.receipt_state != 'not_sent' else None,
+                                    'write_error_code': save.write_error_code or (save.error_code
+                                        if save.receipt_state != 'not_sent' and save.error_code in
+                                        ('version_conflict', 'authentication_required', 'save_rejected', 'save_unconfirmed') else None)})
         return self.get(run_id)
 
     def begin_save_request(self, run_id: str, *, request_version: str, result_url_fingerprint: str, expected_version: int):
@@ -49,24 +52,31 @@ class SaveStoreMixin:
         return self.get(run_id)
 
     def record_save_outcome(self, run_id: str, outcome: str, *, response_version: str | None = None,
-                            expected_version: int):
+                            expected_version: int, write_error_code: str | None = None, write_status: int | None = None):
         if outcome not in ('accepted', 'unknown', 'rejected'):
             raise RunError('invalid_outcome')
         with self._edit(run_id, expected_version) as (r, data):
-            if r.asset_save.receipt_state not in ('intent_recorded', 'unknown') or r.stage not in SAVE_STAGES:
+            if (r.asset_save.receipt_state not in ('intent_recorded', 'unknown')
+                    or r.stage not in (*SAVE_STAGES, 'needs_attention', 'ready_for_editor')):
                 raise RunError('invalid_stage')
             if outcome == 'accepted' and not response_version:
                 raise RunError('invalid_outcome')
-            data.update(stage='verifying_assets', asset_save={**r.asset_save.model_dump(), 'state': 'verifying',
-                        'receipt_state': outcome, 'response_version': response_version})
+            verified = r.asset_save.state == 'saved_verified'
+            conflicting_ack = verified and outcome == 'accepted' and response_version != r.asset_save.verified_version
+            data.update(stage='needs_attention' if conflicting_ack else 'ready_for_editor' if verified else 'verifying_assets',
+                        asset_save={**r.asset_save.model_dump(), 'state': 'needs_attention' if conflicting_ack else 'saved_verified' if verified else 'verifying',
+                        'receipt_state': outcome, 'response_version': response_version,
+                        'write_error_code': write_error_code, 'write_status': write_status,
+                        'error_code': 'verification_failed' if conflicting_ack else r.asset_save.error_code})
         return self.get(run_id)
 
-    def fail_save(self, run_id: str, code: str, *, expected_version: int):
+    def fail_save(self, run_id: str, code: str, *, expected_version: int, read_error_code: str | None = None):
         with self._edit(run_id, expected_version) as (r, data):
             if r.stage not in SAVE_STAGES:
                 raise RunError('invalid_stage')
             data.update(stage='needs_attention', asset_save={**r.asset_save.model_dump(),
-                        'state': 'needs_attention', 'checked_at': now(), 'error_code': code})
+                        'state': 'needs_attention', 'checked_at': now(),
+                        'error_code': r.asset_save.write_error_code or code, 'read_error_code': read_error_code})
         return self.get(run_id)
 
     def finish_save(self, run_id: str, *, verified_version: str, fingerprint: str, expected_version: int,
@@ -88,15 +98,20 @@ class SaveStoreMixin:
             history = list(r.favorite_replacements)
             for choice in p.selections:
                 c, target = choice.candidate, choice.target
-                history.append(FavoriteReplacement(run_id=r.id, video_id=r.video_id,
+                entry = FavoriteReplacement(run_id=r.id, video_id=r.video_id,
                     scene_index=target.scene_index, scene_id=target.scene_id, layer_id=target.layer_id,
                     item_index=choice.result_item_index,
                     reference=AssetReference(kind='video', bucket=c.bucket, filename=c.segment, segment=c.segment,
                         video_id=c.video_id, frame_index=c.frame_index, timestamp=c.timestamp, start_frame=0,
                         end_frame=min(math.floor(c.duration * 30), choice.slot_frames)),
-                    source=c.source, search=p.policy.search, favorites_only=True, saved_verified=True, verified_at=checked))
+                    source=c.source, search=p.policy.search, favorites_only=True, saved_verified=True, verified_at=checked)
+                # A late, different response version may require another read of
+                # already verified content. Retain its original placement proof.
+                if not any(item.model_dump(exclude={'verified_at'}) == entry.model_dump(exclude={'verified_at'})
+                           for item in history):
+                    history.append(entry)
             data.update(stage='ready_for_editor', favorite_replacements=tuple(x.model_dump() for x in history),
                         asset_save={**s.model_dump(), 'state': 'unchanged_verified' if unchanged else 'saved_verified',
                             'verified_version': verified_version, 'verified_fingerprint': fingerprint,
-                            'checked_at': checked, 'error_code': None})
+                            'checked_at': checked, 'error_code': None, 'read_error_code': None})
         return self.get(run_id)

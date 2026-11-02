@@ -1,4 +1,4 @@
-import type { InfoXPrepareInput, InfoXRun, Job, MyassetSource, SessionInfo, SourceFile } from './types'
+import type { EditorAttempt, InfoXPrepareInput, InfoXRun, Job, MyassetSource, SessionInfo, SourceFile } from './types'
 
 interface ApiErrorBody {
   detail?: string
@@ -46,6 +46,15 @@ export async function bootstrapSession(): Promise<SessionInfo> {
 }
 
 export const api = {
+  latestEditor(id: string): Promise<{ attempt: EditorAttempt | null }> {
+    return request(`/api/infox-runs/${encodeURIComponent(id)}/editor-attempts`)
+  },
+  claimEditor(id: string, body: { attempt_id: string; mode: 'automatic' | 'manual'; tab_state: 'created' | 'blocked' }): Promise<{ claimed: boolean; attempt: EditorAttempt }> {
+    return request(`/api/infox-runs/${encodeURIComponent(id)}/editor-attempts`, { method: 'POST', body: JSON.stringify(body) })
+  },
+  updateEditor(id: string, attempt: string, body: { expected_version: number; state: string }): Promise<EditorAttempt> {
+    return request(`/api/infox-runs/${encodeURIComponent(id)}/editor-attempts/${encodeURIComponent(attempt)}`, { method: 'POST', body: JSON.stringify(body) })
+  },
   planInfox(id: string): Promise<InfoXRun> {
     return request(`/api/infox-runs/${encodeURIComponent(id)}/replacement-plan`, { method: 'POST' })
   },

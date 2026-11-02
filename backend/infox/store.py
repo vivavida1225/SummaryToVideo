@@ -15,9 +15,10 @@ from .run_models import Receipt, RunError, RunRecord, Tracking, now
 from .asset_models import AssetAudit
 from .plan_models import PreservationChecks, ReplacementPlan, ReplacementChoice, SearchEvidence
 from .save_store import SaveStoreMixin
+from .editor import EditorStoreMixin
 
 
-class RunStore(SaveStoreMixin):
+class RunStore(SaveStoreMixin, EditorStoreMixin):
     def __init__(self, root: Path):
         self.root = root.resolve()
 
@@ -90,8 +91,17 @@ class RunStore(SaveStoreMixin):
     def resumable(self) -> list[RunRecord]:
         with self._transaction() as conn:
             return [record for row in conn.execute('SELECT record FROM runs')
-                    if (record := self._decode(row)).stage not in
-                    ('prepared', 'draft_ready', 'assets_audited', 'replacement_planned', 'ready_for_editor', 'failed', 'needs_attention')]
+                    if ((record := self._decode(row)).stage not in
+                    ('prepared', 'draft_ready', 'assets_audited', 'replacement_planned', 'ready_for_editor', 'failed', 'needs_attention')
+                    or (record.continuation == 'automatic' and record.stage in
+                        ('draft_ready', 'assets_audited', 'replacement_planned')))]
+
+    def set_continuation(self, run_id: str, mode: str, *, expected_version: int) -> RunRecord:
+        if mode not in ('manual', 'automatic'):
+            raise RunError('invalid_operation')
+        with self._edit(run_id, expected_version) as (_, data):
+            data['continuation'] = mode
+        return self.get(run_id)
 
     def begin_plan(self, run_id: str, *, expected_version: int) -> RunRecord:
         with self._edit(run_id, expected_version) as (record,data):

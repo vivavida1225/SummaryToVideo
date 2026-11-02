@@ -1,8 +1,8 @@
-# InfoX 1·2·3·4·5단계 완료 및 6단계 인계
+# InfoX 1~7단계 구현 현황과 실제 검증 인계
 
 작성일: 2026-11-02 (한국 시간). 프로젝트: `C:\WORKS\SummaryToVideo`, 브랜치: `master`.
 
-현재는 **1·2·3·4·5단계 완료**다. 아래 기존 단계의 기록은 당시 범위이며, 문서 마지막의 **5단계 구현·실검증·6단계 진입점**이 현재 기준이다. [2단계 실행 문서](phase2-runs.md)의 스냅샷·CAS 계약과 3단계의 실제 완료 이벤트 검증도 계속 적용한다.
+현재 구현 기준은 문서 마지막의 **7단계 구현·검증·남은 실제 조건**이다. 아래 기존 단계 기록은 당시 범위다. 7단계 코드와 통제 검증은 구현했지만, 실제 문제 에셋 교체 저장·충돌·적용 재조회·사용자 브라우저 편집기 재생까지 포함한 전체 자동화 실검증은 완료되지 않았다. [2단계 실행 문서](phase2-runs.md)의 스냅샷·CAS 계약과 3단계의 실제 완료 이벤트 검증도 계속 적용한다.
 
 ## 1단계 완료 기록
 
@@ -457,3 +457,66 @@ $env:PSModulePath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\Modules;$en
 6. `saving.py`의 보수적인 전체 결과/URL 자원 지문과 버전 비교는 예상치 못한 서버 필드 추가·변환도 보류한다. 실제 서비스가 정규화하는 필드가 확인되면 근거와 회귀 테스트를 갖춰 허용 범위를 좁게 확장한다. 서버 원문/비밀/서명 URL을 일반 로그나 Git에 남기지 않는다.
 
 기존 미커밋 README·scripts/launch.ps1·toggle.cmd·outputs와 .runtime의 자격/원격 자료는 이번 커밋에 포함하지 않는다.
+
+## 7단계 구현·검증·남은 실제 조건 (2026-11-02)
+
+기준 커밋은 6단계 `6e9e0556f246c29db4164292beebc691592d5101`이다. [7단계 계획과 실행 기록](../superpowers/plans/2026-11-02-infox-phase7.md), [통제 브라우저 결과](phase7-browser-verification.json), [기존 실제 실행의 읽기 전용 결과](phase7-live-verification.json)를 함께 읽는다. 이 절은 위 단계들의 현재 진입점이며, **코드·통제 테스트 완료와 전체 자동화 실제 검증 완료를 구분한다.**
+
+### 브라우저 이동 계약
+
+- 제작 시작 클릭의 동기 구간에서 `about:blank` 대기 탭을 확보한다. 화면에는 아직 서버 검증 중임을 표시한다. 팝업이 차단돼도 제작 결과와 검증은 독립적으로 진행한다.
+- 이동에는 `stage=ready_for_editor`, `asset_save.state in (saved_verified, unchanged_verified)`, `requires_reconciliation=false`가 모두 필요하다. 영상 ID도 검증하며, 브라우저와 이동 intent API가 각각 조건을 확인한다. stage나 URL 존재만으로 이동하지 않는다.
+- SQLite `editor_attempts`는 실행 레코드와 별도 테이블이다. 실행별 automatic claim의 UNIQUE 제약과 attempt의 version CAS가 중복 폴링·여러 탭의 자동 이동을 막는다. 소유권을 얻지 못한 화면은 새로 만든 빈 대기 탭만 닫는다. 브라우저 기록 갱신은 제작 실행 version이나 snapshot을 변경하지 않는다.
+- `waiting/blocked`는 탭 확보/차단 관찰, `navigate_intent`는 이동 직전 영속 의도, `navigation_requested`는 `location.replace` 호출이 반환됐다는 관찰이다. 마지막 상태도 실제 페이지 로드·로그인·편집기 준비·재생 성공을 뜻하지 않는다. 교차 출처 페이지를 읽어 성공으로 추정하지 않는다.
+- `closed/failed/unknown`은 각각 닫힌 탭, 이동 호출 실패, 응답 유실 등 불명확한 결과다. 로그인 필요·이동 실패·편집기 준비 상태를 사용자 동작으로 기록할 수 있으며, 준비/로그인은 `*_user_reported`로 명시한다. 사용자 보고도 실제 교체 재생 검증과 별도다.
+- 새로고침·화면 복원은 GET만 수행한다. 과거 waiting/navigate_intent 기록은 불명확한 결과로 표시하며 탭을 다시 만들거나 이동시키지 않는다. 브라우저가 중단됐을 때 정확히 한 번 열렸다고 단정할 수 없다. 열린 탭을 먼저 확인한 뒤 **편집기 다시 열기**로 새 manual attempt를 만들 수 있다.
+- 자동 이동 중 전체 구간은 잠근다. 늦은 복원/보고 응답에는 세대·attempt 식별을 확인해 현재 화면을 덮지 못하게 한다. 닫힌 대기 탭은 화면 타이머 또는 폴링으로 감지한다.
+- 수동 링크는 계속 제공한다. 자동/다시 열기/수동 링크 모두 `https://infox2.infomaxai.com/studio/library/videos/{validated_video_id}?chatboxView=script`로 구성하며, 인증·계정·토큰·taskpopup을 넣지 않는다. 검증이 끝나지 않은 실행에는 원인을 확인하도록 안내하고 수동 링크를 남긴다.
+
+로컬 API는 기존 Host·Origin·X-App-Token 가드를 적용한다. `GET /api/infox-runs/{id}/editor-attempts`는 최신 기록 조회, `POST`는 `{attempt_id, mode: automatic|manual, tab_state: created|blocked}`로 claim, `POST .../editor-attempts/{attempt_id}`는 `{expected_version, state}`로 CAS 갱신이다. URL 입력은 받지 않는다. 단순 GET은 claim·이동·원격 영상 쓰기를 발생시키지 않는다.
+
+### 자동 실행과 복구 계약
+
+- 실행의 `continuation`은 snapshot 설정과 별도이며 기본값은 `manual`이다. 과거 DB에 필드가 없어도 안전하게 읽고, 기존 수동 계획이 자동 저장으로 승격되지 않는다. 명시적 제작 시작만 `automatic` 의도를 영속화한다. 명시적 수동 audit/plan은 manual 의도로 전환하고 계속 조회·검사·로컬 계획만 수행한다.
+- automatic 실행은 draft_ready, auditing_assets, assets_audited, selecting_favorites, 후보 고정 직후, replacement_planned의 중단 지점에서 같은 영상·작업·고정 후보를 사용해 이어 간다. ready/not_needed 계획이 준비되면 저장 조정자로 진행한다. needs_attention은 무한 반복하지 않으며 **기존 자동 실행 계속 확인** 또는 원인별 수동 경로를 제공한다.
+- 접수 unknown은 확인 가능한 기존 ID와 증거만 조사한다. 제목·시각 추정이나 새 프로젝트 생성은 없다. 이전처럼 접수되지 않은 제작을 백엔드 재시작만으로 새로 보내지 않는다. SSE 중단은 같은 video/task 추적과 대본 준비 검증으로 복구하며 작업 완료 신호를 생략하지 않는다.
+- 저장의 intent_recorded/unknown/accepted/rejected는 서버 재조회부터 시작한다. 같은 저장 operation의 POST를 반복하지 않는다. intent 전의 최신 source·후보 재확인도 기존 지문·참조·버전 계약을 유지한다. not_needed는 원격 저장 없이 unchanged_verified로 남으며 saved_verified 이력을 만들지 않는다.
+- 최초 쓰기 결과는 `write_error_code/write_status`, 후속 조회 오류는 `read_error_code`에 구분해 보존한다. 401/403은 authentication_required, 409는 version_conflict를 원인으로 유지한다. 후속 조회 실패와 재시작이 원인을 덮지 않는다. 기존 DB의 알려진 error_code도 재조회 시 보존하며 확인하지 못한 HTTP 상태는 새로 추정하지 않는다.
+- 다른 owner가 POST 완료 전에 미적용 서버를 읽어 needs_attention으로 바꿨어도, 원래 intent의 늦은 응답을 CAS로 기록한다. 반대로 다른 owner가 먼저 적용을 검증했어도 실제 늦은 HTTP 결과를 별도 보관한다. 서버 검증 결과와 쓰기 응답은 서로 대체하지 않는다. 늦은 성공 응답의 버전이 검증 버전과 다르면 확인 필요 상태다.
+- snapshot·video_id·task_id·접수 receipt·고정 후보·저장 intent·검증 지문을 유지한다. 저장 매핑, 한 POST, 최신 source/version 확인, URL 자원 지문·서명 쿼리 갱신, 30fps·명시적 scene.durationInFrames·독립 보존 검증과 uservideo 비어 있지 않음 미지원은 변경하지 않았다.
+
+### 검증 결과와 재현
+
+전체 백엔드 **616 passed**(기존 의존성 경고 3개), 프런트엔드 **84 passed**, vue-tsc 타입 검사와 Vite 프로덕션 빌드 성공. 7단계 복구 테스트 18개, editor API/CAS 테스트 5개, 프런트엔드 이동 테스트 13개를 포함한다. 단계별 중단·재시작, 자동/수동 구분, 이전 DB, 인증 만료·SSE 중단·생성/제작/저장 응답 유실·충돌·동시 실행과 지문/보존 회귀를 검사했다. 늦은 응답 버전 차이의 재검증에서도 같은 배치의 기존 saved_verified 이력을 중복 추가하지 않는다.
+
+독립 코드 리뷰에서 발견한 빠른 재클릭, 늦은 복원/보고 응답, 다른 owner의 조사 뒤 늦은 저장 응답, 이전 DB 충돌 원인 유실은 각각 실패 테스트로 재현한 뒤 수정했다. Critical 0이며 발견한 Important 항목은 수정·회귀 검증했다. 미뤄 둔 경미한 리뷰 항목은 없다.
+
+```powershell
+$env:PSModulePath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\Modules;$env:ProgramFiles\WindowsPowerShell\Modules"
+.venv/Scripts/python.exe -m pytest -q
+.tools/node/node.exe frontend/node_modules/vitest/vitest.mjs run --root frontend
+.tools/node/node.exe frontend/node_modules/vue-tsc/bin/vue-tsc.js -b frontend/tsconfig.json
+.tools/node/node.exe frontend/node_modules/vite/bin/vite.js build frontend
+.venv/Scripts/python.exe -m tests.infox_runs_browser_smoke
+.venv/Scripts/python.exe -m tests.infox_editor_browser_smoke
+# 기존 marker 유지, 읽기 전용 인증/영상 조회만 허용한다.
+.venv/Scripts/python.exe -m tests.infox_save_live --phase7
+```
+
+PowerShell 모듈 경로를 설정하지 않은 최초 전체 실행은 Get-FileHash 모듈 로딩 때문에 런처 테스트 6개가 실패했다. 위 문서화된 환경을 적용한 전체 재실행은 통과했으며 런처 원본을 이번 범위에서 변경하지 않았다.
+
+검증을 병렬 실행할 때 프런트엔드의 기존 폴링 테스트 하나가 5초 제한을 넘긴 실행도 있었다. 최종 전체 프런트엔드를 단독 재실행해 84개 통과를 확인했다. 브라우저 검증에서는 원래 앱 탭으로 돌아와 결과 표시를 확인하며, 닫힌 탭·중단 의도·이동 응답 유실은 자동 성공으로 처리하지 않는다.
+
+### 실제 확인 범위와 남은 진입점
+
+기존 `.runtime/infox-phase3-live.json`과 실행 DB를 그대로 사용했다. 실제 인증과 같은 영상의 서버 재조회에서 snapshot·video/task·접수 receipt·원격 버전·저장 검증 지문·즐겨찾기 이력이 유지됨을 확인했다. 실행은 detected=0, selections=0, auto_replace=false, not_needed/unchanged_verified다. **원격 영상 쓰기는 0회**이며 새 프로젝트·재제작·합성 hit·검사 결과 조작은 없었다.
+
+사용자 Chrome을 확인하려 했지만 Computer Use가 Windows의 현재 브라우저 URL을 안전하게 판별하지 못해 중단했다. 이후 사용자 브라우저 UI 작업은 시도하지 않았다. 따라서 기존 영상의 실제 편집기 열람·로그인 상태·편집기 준비·재생도 이번에 확인했다고 기록하지 않는다. 올바른 편집 URL 구성과 실제 서버의 영상 준비 확인은 사용자 브라우저 탐색 성공과 별도다.
+
+통제 브라우저 결과는 실제 로컬 FastAPI·SQLite와 Edge에서 실행하되 InfoX 생성·제작·영상 저장은 가짜 client, 편집 URL은 가짜 페이지로 차단·응답한 결과다. 실제 InfoX 로그인·저장·재생 증거로 사용하지 않는다. 세부 시나리오와 결과는 phase7-browser-verification.json을 따른다.
+
+최종 Edge **8개 시나리오 통과**: 정상 대기→검증 후 이동, 여러 탭의 자동 claim 중복 방지, 팝업 차단, 대기 탭 닫힘, 새로고침 중단, 이동 호출 실패, 영속 이동 intent의 응답 유실, 로컬 백엔드 프로세스 재시작과 세션 갱신. 각 시나리오에서 조회 전용 복원·명시적 다시 열기·실패 표시·390/1440px 레이아웃을 확인했으며, 생성/제작은 가짜 client에서 각각 한 번이다. 원격 네트워크 요청은 없고 편집 URL은 통제 페이지로 응답했다. 기존 runs 브라우저 스모크의 고정 후보·혼합 교체·저장/재조회·이력 복원도 통과했다.
+
+후속 실제 검증은 기존 올바른 영상을 사용자 로그인 브라우저에서 열고 접근·준비·가능한 재생을 확인하는 것부터 시작한다. 이것도 교체 영상 검증으로 대체하지 않는다. 6단계에서 남긴 **실제 문제 에셋 교체의 단일 저장 POST, 실제 충돌 응답, 적용 재조회, 반복/잘림/빈 구간·소재 음소거·TTS·자막·크롭·새로고침 후 유지와 재생**은 승인된 실제 변경 대상이 생긴 뒤 수행한다. 기존 marker를 삭제하거나 현재 실행을 조작해 경로를 강제로 통과시키지 않는다. 그 전에는 전체 자동화를 실검증 완료로 표시하지 않는다.
+
+기존 README.md·scripts/launch.ps1·toggle.cmd·outputs의 미커밋 작업은 보존하고 이번 커밋에서 제외한다. .runtime과 자격·쿠키·서명 URL·원본 원격 JSON은 Git에 넣지 않는다. 최종 커밋과 origin/master 일치 해시는 전달 결과에서 확인한다.

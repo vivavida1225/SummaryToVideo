@@ -19,7 +19,7 @@ from backend.infox.tracking import verify_draft
 from backend.infox.assets import audit_assets
 
 
-async def main(root=ROOT):
+async def main(root=ROOT, *, phase7=False):
     store = RunStore(root)
     marker = json.loads((root / '.runtime/infox-phase3-live.json').read_text(encoding='utf-8'))
     original = store.get(marker['run_id'])
@@ -85,15 +85,29 @@ async def main(root=ROOT):
             },
             'operations': calls,
         }
-        (root / 'docs/infox/phase6-live-verification.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+        if phase7:
+            report['phase'] = 7
+            report['browser_verification'] = {
+                'existing_editor_url_correctly_derived': True,
+                'user_browser_navigation_verified': False,
+                'actual_logged_in_editor_ready_verified': False,
+                'actual_existing_video_playback_verified': False,
+                'reason': 'Computer Use stopped because it could not determine the current Windows browser URL with enough confidence to enforce policy; no further user-browser UI actions were attempted.',
+            }
+        name = 'phase7-live-verification.json' if phase7 else 'phase6-live-verification.json'
+        (root / 'docs/infox' / name).write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
         print(json.dumps(report, ensure_ascii=True))
     finally:
         await manager.close()
 
 
 if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser(description='Existing-run read-only verification; never writes remote video data.')
+    parser.add_argument('--phase7', action='store_true')
+    args = parser.parse_args()
     try:
-        asyncio.run(main())
+        asyncio.run(main(phase7=args.phase7))
     except Exception:
         print('{"error":"existing_run_read_only_save_verification_incomplete"}')
         raise SystemExit(1) from None

@@ -7,6 +7,7 @@ import StatusTimeline from './components/StatusTimeline.vue'
 import InfoXAssetAudit from './components/InfoXAssetAudit.vue'
 import InfoXAssetSave from './components/InfoXAssetSave.vue'
 import InfoXReplacementPlan from './components/InfoXReplacementPlan.vue'
+import { EditorNavigation, editorEligible, editorUrl } from './infoxEditor'
 import type { InfoXPrepareInput, InfoXRun, Job, SessionInfo, SourceFile } from './types'
 
 const JOB_STORAGE_KEY = 'market-compressor.job-id'
@@ -51,7 +52,24 @@ const composingCompressed = ref(false)
 const infoxRun = ref<InfoXRun | null>(null)
 const infoxLoading = ref(false)
 const infoxStarting = ref(false)
+const editorNavigation = new EditorNavigation({
+  latestEditor: id => withInfoxSession(() => api.latestEditor(id)),
+  claimEditor: (id, body) => withInfoxSession(() => api.claimEditor(id, body)),
+  updateEditor: (id, attempt, body) => withInfoxSession(() => api.updateEditor(id, attempt, body)),
+})
+const editorAttempt = editorNavigation.attempt
+const editorMessage = editorNavigation.message
+const editorBusy = computed(() => editorNavigation.busy.value || editorNavigation.navigating.value)
+watch(infoxRun, record => { if (record) void editorNavigation.advance(record) })
+
+async function reopenEditor() {
+  if (!infoxRun.value || !editorEligible(infoxRun.value)) return
+  const record = infoxRun.value
+  await editorNavigation.begin(record.id, 'manual')
+  if (infoxRun.value?.id === record.id) await editorNavigation.advance(infoxRun.value)
+}
 let infoxPollTimer: number | undefined
+let editorTabTimer: number | undefined
 const infoxActiveStages = new Set(['creating_project', 'project_created', 'starting_generation', 'generating', 'checking_draft', 'auditing_assets', 'selecting_favorites', 'replacing_assets', 'saving_assets', 'verifying_assets'])
 const infoxStageLabels: Record<string, string> = {
   prepared: '전송본 확정 · 제작 요청 전', creating_project: 'InfoX 프로젝트 생성 요청 중',
@@ -183,7 +201,10 @@ async function startInfox() {
   const jobId = job.value?.id
   infoxStarting.value = true
   infoxError.value = ''
+  // Reserve the window synchronously in the click; claim is durable before start.
+  const browserClaim = editorNavigation.begin(id, 'automatic')
   try {
+    await browserClaim
     const record = await withInfoxSession(() => api.startInfox(id))
     if (disposed || job.value?.id !== jobId || infoxRun.value?.id !== id) return
     infoxRun.value = record
@@ -260,6 +281,7 @@ async function saveInfox() {
 
 watch(() => job.value?.id, async id => {
   stopInfoxPolling()
+  editorNavigation.reset()
   infoxRun.value = null
   infoxError.value = ''
   infoxReviewConfirmed.value = false
@@ -285,6 +307,7 @@ watch(() => job.value?.id, async id => {
     const restored = await withInfoxSession(() => api.latestInfox(id))
     if (disposed || job.value?.id !== id) return
     infoxRun.value = restored
+    if (restored) void editorNavigation.restore(restored.id)
     if (restored && (restored.tracking_active || infoxActiveStages.has(restored.stage))) pollInfox(restored.id)
     if (restored && !infoxPending.value) {
       infoxTitle.value = restored.snapshot.settings.title
@@ -436,6 +459,7 @@ async function recoverJob(id: string) {
 }
 
 onMounted(async () => {
+  editorTabTimer = window.setInterval(() => { void editorNavigation.checkClosed() }, 1000)
   window.addEventListener('beforeunload', warnUnsaved)
   document.addEventListener('click', dismissMyassetSettings, true)
   try {
@@ -465,6 +489,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   stopInfoxPolling()
+  window.clearInterval(editorTabTimer)
+  editorNavigation.reset()
   window.removeEventListener('beforeunload', warnUnsaved)
   document.removeEventListener('click', dismissMyassetSettings, true)
   disposed = true
@@ -893,6 +919,8 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
               {{ infoxStarting ? '요청 확인 중…' : infoxRun.stage === 'prepared' ? '확정본으로 InfoX 제작 시작' : '기존 실행 상태 다시 확인' }}
             </button>
             <button v-if="infoxActiveStages.has(infoxRun.stage)" type="button" class="ghost-button" @click="pollInfox(infoxRun.id)">진행 상태 다시 조회</button>
+            <button v-if="infoxRun.continuation === 'automatic' && infoxRun.stage === 'needs_attention' && infoxRun.asset_audit?.state !== 'not_started' && infoxRun.asset_save?.state === 'not_started'"
+              type="button" class="ghost-button" :disabled="inputBusy || infoxLoading || infoxStarting || infoxRun.tracking_active" @click="startInfox">기존 자동 실행 계속 확인</button>
             <button v-if="(!infoxRun.asset_save || infoxRun.asset_save.state === 'not_started') && infoxRun.tracking?.completion_seen && !infoxRun.requires_reconciliation && (['draft_ready', 'assets_audited', 'replacement_planned', 'needs_attention'].includes(infoxRun.stage) || (infoxRun.stage === 'auditing_assets' && !infoxRun.tracking_active))"
               type="button" class="ghost-button" :disabled="inputBusy || infoxLoading || infoxStarting || infoxRun.tracking_active" @click="auditInfox">
               {{ infoxStarting ? '검사 요청 중…' : !infoxRun.asset_audit || infoxRun.asset_audit.state === 'not_started' ? '기업 에셋 검사' : '배정 에셋 다시 검사' }}
@@ -909,7 +937,18 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
               {{ infoxRun.asset_save && infoxRun.asset_save.state !== 'not_started' ? '기존 저장·검증 상태 다시 확인' : infoxRun.replacement_plan?.state === 'not_needed' ? '교체 불필요 상태 서버 재확인' : '검증한 교체 계획 서버 저장' }}
             </button>
             <InfoXAssetSave v-if="infoxRun.asset_save" :save="infoxRun.asset_save" />
-            <p v-if="infoxRun.editor_url"><a :href="infoxRun.editor_url" target="_blank" rel="noopener noreferrer">InfoX 편집 화면 수동 열기</a></p>
+            <section class="infox-asset-audit" aria-label="편집기 브라우저 이동">
+              <h4>편집기 브라우저 이동</h4>
+              <p role="status">{{ editorMessage }}</p>
+              <p v-if="!editorEligible(infoxRun)">서버 검증이 아직 완료되지 않아 자동 이동을 보류합니다. 위의 검사·후보·저장 원인을 확인하세요. 수동 편집 링크는 사용할 수 있습니다.</p>
+              <button v-if="editorEligible(infoxRun)" type="button" class="ghost-button" :disabled="editorBusy" @click="reopenEditor">편집기 다시 열기</button>
+              <template v-if="editorAttempt && ['navigation_requested', 'login_required', 'ready_reported'].includes(editorAttempt.state)">
+                <button type="button" class="ghost-button" :disabled="editorBusy" @click="editorNavigation.report('login_required')">로그인 필요 상태 기록</button>
+                <button type="button" class="ghost-button" :disabled="editorBusy" @click="editorNavigation.report('failed')">이동 실패 상태 기록</button>
+                <button type="button" class="ghost-button" :disabled="editorBusy" @click="editorNavigation.report('ready_reported')">편집기 준비 사용자 확인</button>
+              </template>
+            </section>
+            <p v-if="editorUrl(infoxRun)"><a :href="editorUrl(infoxRun)!" target="_blank" rel="noopener noreferrer">InfoX 편집 화면 수동 열기</a></p>
           </div>
         </section>
       </section>

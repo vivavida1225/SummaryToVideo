@@ -84,6 +84,7 @@ export interface InfoXRun {
   version: number
   requires_reconciliation: boolean
   tracking_active?: boolean
+  continuation?: 'manual' | 'automatic'
   asset_audit?: InfoXAssetAudit
   asset_counts?: Record<string, number>
   replacement_plan?: InfoXReplacementPlan
@@ -113,8 +114,22 @@ export interface InfoXAssetSave {
   state: string
   receipt_state: string
   error_code?: string | null
+  write_error_code?: string | null
+  write_status?: number | null
+  read_error_code?: string | null
   response_version?: string | null
   verified_version?: string | null
+}
+
+export interface EditorAttempt {
+  id: string
+  run_id: string
+  mode: 'automatic' | 'manual'
+  version: number
+  state: string
+  video_id: string | null
+  editor_url: string | null
+  editor_status: string
 }
 
 export interface InfoXReplacementPlan {
