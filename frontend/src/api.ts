@@ -1,4 +1,4 @@
-import type { Job, MyassetSource, SessionInfo, SourceFile } from './types'
+import type { InfoXPrepareInput, InfoXRun, Job, MyassetSource, SessionInfo, SourceFile } from './types'
 
 interface ApiErrorBody {
   detail?: string
@@ -46,6 +46,19 @@ export async function bootstrapSession(): Promise<SessionInfo> {
 }
 
 export const api = {
+  prepareInfox(id: string, input: InfoXPrepareInput): Promise<InfoXRun> {
+    return request(`/api/jobs/${encodeURIComponent(id)}/infox-runs`, { method: 'POST', body: JSON.stringify(input) })
+  },
+
+  async latestInfox(id: string): Promise<InfoXRun | null> {
+    const result = await request<{ run: InfoXRun | null }>(`/api/jobs/${encodeURIComponent(id)}/infox-runs`)
+    return result.run ?? null
+  },
+
+  infoxRun(id: string): Promise<InfoXRun> {
+    return request(`/api/infox-runs/${encodeURIComponent(id)}`)
+  },
+
   myassetSource(baseDate: string, gubun: number): Promise<MyassetSource> {
     return request('/api/sources/myasset', { method: 'POST', body: JSON.stringify({ base_date: baseDate, gubun }) })
   },

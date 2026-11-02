@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { api, ApiError, bootstrapSession } from './api'
 import ResultPanel from './components/ResultPanel.vue'
 import StatusTimeline from './components/StatusTimeline.vue'
-import type { Job, SessionInfo, SourceFile } from './types'
+import type { InfoXPrepareInput, InfoXRun, Job, SessionInfo, SourceFile } from './types'
 
 const JOB_STORAGE_KEY = 'market-compressor.job-id'
 const MODEL_STORAGE_KEY = 'market-compressor.model'
@@ -45,6 +45,18 @@ const savedCompressed = ref('')
 const savingCompressed = ref(false)
 const compressedSaveError = ref('')
 const composingCompressed = ref(false)
+const infoxRun = ref<InfoXRun | null>(null)
+const infoxLoading = ref(false)
+const infoxError = ref('')
+const infoxReviewConfirmed = ref(false)
+const infoxTitle = ref('시황 영상')
+const infoxAutoReplace = ref(true)
+const infoxPending = ref<InfoXPrepareInput | null>(null)
+const infoxNeedsReview = computed(() => job.value?.state !== 'completed' || !!job.value?.validation_issues?.length)
+const infoxChanged = computed(() => !!infoxRun.value && (compressedDirty.value ||
+  infoxRun.value.snapshot.revision !== (job.value?.revision ?? 0) ||
+  infoxRun.value.snapshot.settings.title !== infoxTitle.value ||
+  infoxRun.value.snapshot.settings.auto_replace !== infoxAutoReplace.value))
 let saveQueue: Promise<void> | null = null
 const compressedDirty = computed(() => compressedDraft.value !== savedCompressed.value)
 const manuallyEdited = computed(() => !!job.value?.edited_at || compressedDirty.value)
@@ -110,8 +122,96 @@ function rememberJob(nextJob: Job) {
 }
 
 function editCompressed(text: string) {
+  if (text !== compressedDraft.value) infoxReviewConfirmed.value = false
   compressedDraft.value = text
   if (!composingCompressed.value) void flushCompressed().catch(() => {})
+}
+
+const infoxPendingKey = (id: string) => `market-compressor.infox-pending.${id}`
+
+async function withInfoxSession<T>(action: () => Promise<T>): Promise<T> {
+  try { return await action() } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 403) throw error
+    session.value = await bootstrapSession()
+    return action()
+  }
+}
+
+watch(() => job.value?.id, async id => {
+  infoxRun.value = null
+  infoxError.value = ''
+  infoxReviewConfirmed.value = false
+  infoxPending.value = null
+  infoxTitle.value = '시황 영상'
+  infoxAutoReplace.value = true
+  if (!id) return
+  try {
+    const pending = readStored('sessionStorage', infoxPendingKey(id))
+    if (pending) {
+      const parsed = JSON.parse(pending) as InfoXPrepareInput
+      if (typeof parsed.intent_id === 'string' && Number.isInteger(parsed.revision) &&
+          typeof parsed.settings?.title === 'string' && typeof parsed.settings.auto_replace === 'boolean' &&
+          typeof parsed.review_confirmed === 'boolean' && typeof parsed.new_run === 'boolean') {
+        infoxPending.value = parsed
+        infoxTitle.value = parsed.settings.title
+        infoxAutoReplace.value = parsed.settings.auto_replace
+      }
+    }
+  } catch { infoxError.value = '이전 요청을 읽지 못했습니다. 보관된 전송본을 확인하세요.' }
+  infoxLoading.value = true
+  try {
+    const restored = await withInfoxSession(() => api.latestInfox(id))
+    if (disposed || job.value?.id !== id) return
+    infoxRun.value = restored
+    if (restored && !infoxPending.value) {
+      infoxTitle.value = restored.snapshot.settings.title
+      infoxAutoReplace.value = restored.snapshot.settings.auto_replace
+    }
+  } catch (error) {
+    if (!disposed && job.value?.id === id) infoxError.value = friendlyError(error)
+  } finally {
+    if (job.value?.id === id) infoxLoading.value = false
+  }
+})
+
+async function prepareInfox() {
+  if (!job.value || inputBusy.value || infoxLoading.value || composingCompressed.value) return
+  if (!infoxPending.value && infoxNeedsReview.value && !infoxReviewConfirmed.value) return
+  const id = job.value.id
+  actionBusy.value = true
+  infoxError.value = ''
+  try {
+    if (!infoxPending.value) {
+      await flushCompressed()
+      if (disposed || job.value?.id !== id) return
+      if (composingCompressed.value || compressedDirty.value || compressedSaveError.value) {
+        throw new Error('최신 대본 저장을 완료한 뒤 확정하세요.')
+      }
+      infoxPending.value = {
+        intent_id: crypto.randomUUID(), revision: job.value.revision ?? 0,
+        settings: { title: infoxTitle.value, auto_replace: infoxAutoReplace.value },
+        review_confirmed: infoxReviewConfirmed.value, new_run: false,
+      }
+      writeStored('sessionStorage', infoxPendingKey(id), JSON.stringify(infoxPending.value))
+    }
+    // A lost response is retried with the exact same intent, revision and settings.
+    const pending = infoxPending.value
+    const record = await withInfoxSession(() => api.prepareInfox(id, pending))
+    if (disposed || job.value?.id !== id) return
+    infoxRun.value = record
+    infoxPending.value = null
+    writeStored('sessionStorage', infoxPendingKey(id), null)
+    announcement.value = 'InfoX 전송본을 확정해 보관했습니다.'
+  } catch (error) {
+    if (!disposed && job.value?.id === id) {
+      infoxError.value = friendlyError(error)
+      // A received 4xx (except session expiry) proves the preparation was rejected.
+      if (error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 403) {
+        infoxPending.value = null
+        writeStored('sessionStorage', infoxPendingKey(id), null)
+      }
+    }
+  } finally { actionBusy.value = false }
 }
 
 function composeCompressed(active: boolean) {
@@ -631,6 +731,37 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
             @download="downloadResult('compressed')"
           />
         </div>
+        <section v-if="job.compressed !== null" class="infox-preparation" aria-labelledby="infox-heading">
+          <div>
+            <p class="eyebrow">INFOX</p>
+            <h3 id="infox-heading">영상 전송본 준비</h3>
+            <p>대본과 설정을 확정해 보관합니다. 아직 InfoX 영상은 생성하지 않습니다.</p>
+          </div>
+          <label for="infox-title">InfoX 영상 제목</label>
+          <input id="infox-title" v-model="infoxTitle" type="text" maxlength="200" :disabled="inputBusy || infoxLoading || !!infoxPending" />
+          <p>템플릿 1786 · 남/아나운서/당당 · 속도 1.0 · 목표 60초</p>
+          <label class="transcribe-toggle">
+            <input v-model="infoxAutoReplace" type="checkbox" :disabled="inputBusy || infoxLoading || !!infoxPending" />
+            <span>반도체 즐겨찾기 자동 대체 사용</span>
+          </label>
+          <label v-if="infoxNeedsReview" class="transcribe-toggle">
+            <input v-model="infoxReviewConfirmed" type="checkbox" :disabled="inputBusy || infoxLoading || !!infoxPending" />
+            <span>검토 사유를 확인하고 이 대본을 사용합니다</span>
+          </label>
+          <p v-if="infoxPending">이전 요청의 확정 결과부터 확인합니다. 추가 편집은 기존 전송본과 분리됩니다.</p>
+          <div v-if="infoxError" class="inline-error" role="alert">{{ infoxError }}</div>
+          <button class="ghost-button" type="button" @click="prepareInfox"
+            :disabled="inputBusy || infoxLoading || composingCompressed ||
+              (!infoxPending && (!compressedDraft.trim() || !infoxTitle.trim() || (infoxNeedsReview && !infoxReviewConfirmed)))">
+            {{ actionBusy ? '확정하는 중…' : infoxPending ? '확정 결과 다시 확인' : 'InfoX 전송본 확정' }}
+          </button>
+          <div v-if="infoxRun" class="infox-summary" aria-live="polite">
+            <strong>{{ infoxRun.stage === 'prepared' ? '전송본이 확정되었습니다.' : '보관된 실행 기록을 복원했습니다.' }}</strong>
+            <p>확정 대본 버전 {{ infoxRun.snapshot.revision }} · {{ infoxRun.snapshot.scenes.length }}장면 · {{ infoxRun.snapshot.settings.title }}</p>
+            <p v-if="infoxRun.requires_reconciliation">접수 여부 확인이 필요합니다. 기존 실행은 다시 전송하지 않습니다.</p>
+            <p v-if="infoxChanged">현재 편집본 또는 설정이 확정본과 다릅니다.</p>
+          </div>
+        </section>
       </section>
     </main>
 

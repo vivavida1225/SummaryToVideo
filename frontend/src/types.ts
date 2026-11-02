@@ -69,3 +69,28 @@ export interface MyassetSource {
   base_date: string
   gubun: number
 }
+
+export interface InfoXPrepareInput {
+  intent_id: string
+  revision: number
+  settings: { title: string; auto_replace: boolean }
+  review_confirmed: boolean
+  new_run: boolean
+}
+
+export interface InfoXRun {
+  id: string
+  stage: string
+  version: number
+  requires_reconciliation: boolean
+  snapshot: {
+    job_id: string
+    revision: number
+    text: string
+    text_sha256: string
+    scenes: Array<{ line_number: number; scene_index: number; text: string }>
+    settings: { title: string; template_id: number; voice_id: string; voice_speed: string; auto_replace: boolean }
+  }
+  video_id: string | null
+  task_id: string | null
+}

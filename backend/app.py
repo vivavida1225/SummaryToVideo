@@ -15,6 +15,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from .config import MAX_INPUT_BYTES, Settings
 from .jobs import EditConflict, JobConflict, JobManager
+from .infox.run_models import PrepareRunInput, RunError, public_record
+from .infox.service import RunService
+from .infox.store import RunStore
 from .models import MODELS, model_candidates
 from .myasset import MyassetError, fetch_myasset_source
 from .storage import list_sources, source_path
@@ -78,6 +81,7 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
                instance_id: str | None = None, shutdown=None) -> FastAPI:
     settings = settings or Settings()
     manager = JobManager(settings, clipboard=clipboard, compressor_factory=compressor_factory)
+    infox_runs = RunService(manager, RunStore(settings.root))
     token = secrets.token_urlsafe(32)
     identity = instance_id or secrets.token_hex(16)
 
@@ -88,6 +92,7 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
 
     app = FastAPI(title='Summary to Video', docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
     app.state.manager = manager
+    app.state.infox_runs = infox_runs
 
     @app.middleware('http')
     async def local_guard(request: Request, call_next):
@@ -131,6 +136,8 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
 
     @app.exception_handler(RequestValidationError)
     async def invalid_request(_request, exc):
+        if '/infox-runs' in _request.url.path:
+            return JSONResponse({'detail': '대본 버전, 실행 식별자와 InfoX 설정 형식을 확인하세요.'}, status_code=422)
         if _request.url.path.endswith('/compressed'):
             return JSONResponse({'detail': '대본 문자열과 저장 버전을 확인하세요. 대본은 5 MiB 이하만 지원합니다.'}, status_code=422)
         if _request.url.path == '/api/sources/myasset':
@@ -138,6 +145,21 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
         if any('model' in error['loc'] for error in exc.errors()):
             return JSONResponse({'detail': '지원하지 않는 모델입니다. 모델 목록에서 다시 선택하세요.'}, status_code=422)
         return JSONResponse({'detail': '입력 형식을 확인하세요. HTML 또는 파일 경로 중 하나만 지정해야 합니다.'}, status_code=422)
+
+    @app.exception_handler(RunError)
+    async def infox_run_error(_request, exc):
+        messages = {
+            'revision_conflict': '다른 화면에서 대본이 변경되었습니다. 수정 내용을 보관한 뒤 최신 대본을 불러오세요.',
+            'review_required': '생성 당시 검토 사유를 확인하고 대본 사용에 동의해 주세요.',
+            'intent_conflict': '이미 다른 내용으로 사용한 실행 요청입니다. 기존 전송본을 확인하세요.',
+            'run_in_progress': '동일 대본의 실행이 진행 중입니다. 기존 실행을 확인하세요.',
+            'empty_script': '비어 있지 않은 대본을 저장한 뒤 확정하세요.',
+            'job_not_ready': '대본 생성이 끝난 뒤 전송본을 확정하세요.',
+            'run_not_found': 'InfoX 실행 기록을 찾을 수 없습니다.',
+            'storage_error': 'InfoX 실행 기록을 읽거나 저장하지 못했습니다. 같은 요청으로 다시 확인하세요.',
+        }
+        return JSONResponse({'detail': messages.get(exc.code, 'InfoX 실행 기록과 설정을 확인하세요.'),
+                             'code': exc.code, 'run_id': exc.run_id}, status_code=exc.status_code)
 
     @app.get('/api/health')
     async def health():
@@ -192,6 +214,22 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
     @app.get('/api/jobs/{job_id}')
     async def get_job(job_id: str):
         return find_job(job_id)
+
+    @app.post('/api/jobs/{job_id}/infox-runs')
+    async def prepare_infox_run(job_id: str, data: PrepareRunInput):
+        find_job(job_id)
+        record, reused = infox_runs.prepare(job_id, data)
+        return JSONResponse(public_record(record), status_code=200 if reused else 201)
+
+    @app.get('/api/jobs/{job_id}/infox-runs')
+    async def latest_infox_run(job_id: str):
+        find_job(job_id)
+        record = infox_runs.latest(job_id)
+        return {'run': public_record(record) if record is not None else None}
+
+    @app.get('/api/infox-runs/{run_id}')
+    async def get_infox_run(run_id: str):
+        return public_record(infox_runs.get(run_id))
 
     @app.post('/api/jobs/{job_id}/retry', status_code=202)
     async def retry_job(job_id: str, data: ModelInput | None = None):

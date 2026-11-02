@@ -1,12 +1,14 @@
-# InfoX 1단계 완료 및 2단계 인계
+# InfoX 1·2단계 완료 및 3단계 인계
 
 작성일: 2026-11-02 (한국 시간). 프로젝트: `C:\WORKS\SummaryToVideo`, 브랜치: `master`.
 
-## 현재 완료 범위
+현재는 **1·2단계 완료**다. 이 문서의 기존 1단계 기록 뒤에 **2단계 구현·검증·3단계 인계**를 추가했다. 다음 작업자는 아래 추가 기록과 [2단계 실행 문서](phase2-runs.md)부터 읽는다.
+
+## 1단계 완료 기록
 
 [자동화 명세](automation-implementation-spec.md) §15의 **1단계 InfoX 연결 검증**을 구현했다. 백엔드 독립 클라이언트에서 실제 로그인, 기존 영상 조회, 토큰 갱신, 갱신 후 동일 영상 재조회, `반도체` 즐겨찾기 검색, 해당 기존 영상 채널 SSE의 JSON 본문 수신을 확인했다.
 
-프로젝트 생성·제작 시작·에셋 변경·편집 저장은 이번 구현에 없다. 기존 FastAPI 경로, 화면, 대본 생성·편집 저장 및 `X-App-Token`/Host/Origin/CSP 정책은 변경하지 않았다. 2단계 이상이 구현됐다고 간주하지 않는다.
+1단계에는 프로젝트 생성·제작 시작·에셋 변경·편집 저장을 추가하지 않았으며 기존 앱 흐름과 보안 정책을 유지했다. 현재 2단계 변경은 아래 추가 기록에서 구분한다. 외부 제작·에셋 변경은 여전히 후속 단계다.
 
 ## 먼저 읽을 파일
 
@@ -61,9 +63,9 @@ $env:PSModulePath = 'C:\Users\22608024\Documents\WindowsPowerShell\Modules;C:\Pr
 
 검증 결과와 독립 리뷰의 최종 기록은 아래 완료 기록에서 확인한다. 변경 전에는 백엔드 415개 통과·런처 6개 실패였고 위 환경 정리 후 전체가 통과했다. 기존 라이브러리 deprecation 경고 3개는 남아 있다.
 
-## 2단계 작업자의 범위
+## 2단계 구현 기준 (당시 인계, 현재 완료)
 
-다음 작업은 **실행 기록과 대본 확정**이다. 연결이 가능해졌다는 이유로 즉시 생성 요청부터 추가하지 않는다.
+당시 다음 작업으로 지정한 **실행 기록과 대본 확정**의 기준이다. 아래 요구에 따라 구현했으며 생성 요청은 3단계로 유지한다.
 
 1. 최신 `frontend/src/App.vue`의 `flushCompressed()`와 한글 조합/저장 실패/revision 충돌 처리를 다시 읽는다. 저장 완료 전에는 실행을 만들지 않는다.
 2. 백엔드는 `JobManager.get()`의 최신 `compressed`, `revision`을 확인하고 대본·해시·줄/장면 대응·설정·확정 시각을 하나의 불변 스냅샷으로 저장한다. 최초 `compressed.txt`를 읽지 않는다.
@@ -83,7 +85,7 @@ $env:PSModulePath = 'C:\Users\22608024\Documents\WindowsPowerShell\Modules;C:\Pr
 
 시작 시 미커밋이던 루트 `README.md`, `scripts/launch.ps1`, `toggle.cmd`, 기존 `outputs/` 결과물은 이번 커밋에 포함하지 않는다. 명세 파일은 사용자가 구현 기준으로 지정한 문서이므로 원문 그대로 이번 산출물과 함께 커밋한다. 이번 작업 파일만 명시적으로 스테이징한다.
 
-## 완료 기록
+## 1단계 검증 기록
 
 - 실제 독립 CLI: 성공(인증·조회·갱신·재조회·두 검색·SSE JSON 본문). 세부 시각과 결과는 `phase1-live-verification.json`.
 - InfoX 회귀 테스트: **35 passed**. 로그인/갱신·401/403·안전한 오류·검색·SSE·진단 출력을 검증했다.
@@ -91,4 +93,57 @@ $env:PSModulePath = 'C:\Users\22608024\Documents\WindowsPowerShell\Modules;C:\Pr
 - 프런트엔드: **49 passed**. `vue-tsc` 타입 검사와 Vite 프로덕션 빌드 성공.
 - 독립 코드 리뷰: 갱신 직후 일시 오류의 재시도 및 열린 연결에서 CR로 끝나는 SSE 프레임 지연을 재현 테스트로 확인하고 수정했다. 갱신 자체의 실패가 조회 재시도에 섞이지 않는 회귀 테스트도 추가했다. 재검토에서 차단 문제 없음.
 - 커밋 대상 18개 파일을 로컬 설정의 실제 자격·영상 ID와 대조해 일치 없음 확인. 원본 HAR·서명 URL은 추가하지 않았다.
-- 이 문서·구현·원문 명세를 하나의 커밋으로 `origin/master`에 전달한다. 정확한 커밋은 `git log -1`로 확인한다.
+- 1단계는 `8caf6e4`로 `origin/master`에 전달했다.
+
+## 2단계 추가 기록: 구현 완료
+
+**실행 기록과 대본 확정**을 화면부터 로컬 API·영속 저장까지 연결했다. 사용법과 API 계약은 [phase2-runs.md](phase2-runs.md)를 따른다. 사용자에게 보이는 기능은 **InfoX 전송본 확정**이며, 이 시점에는 외부 생성 요청을 보내지 않는다.
+
+| 위치 | 2단계 변경 |
+| --- | --- |
+| `backend/infox/run_models.py` | 엄격한 설정/입력 모델, 불변 대본·장면·진단 스냅샷, 실행 단계·접수 기록 |
+| `backend/infox/service.py` | 최신 JobManager 값/revision/검토 확인 검증, 스냅샷 확정, `creation_body()` |
+| `backend/infox/store.py` | SQLite 원자적 실행+intent 저장, 중복 방지, version CAS, 쓰기 전 의도/접수 결과 |
+| `backend/app.py` | 기존 보안 가드 안의 실행 확정·조회·작업별 최신 실행 API |
+| `frontend/src/App.vue`, `api.ts`, `types.ts`, `style.css` | 저장 대기, 검토 확인, 설정 표시, 응답 유실 처리, 실행 복원/편집 차이 표시 |
+| `tests/test_infox_runs.py`, `test_infox_runs_api.py` | 편집본 일치·트랜잭션/동시성·재시작·접수 상태·API 보안 검증 |
+| `frontend/src/App.spec.ts`, `tests/infox_runs_browser_smoke.py` | UI 저장/IME/충돌/유실/복원 회귀, 실제 로컬 API 브라우저 확인 |
+
+### 확정 정책과 보관 내용
+
+- `flushCompressed()`를 기다린 뒤 새 실행을 요청한다. 저장 실패/한글 조합/revision 충돌에서는 새 전송본을 확정하지 않는다.
+- 백엔드는 최초 `compressed.txt` 대신 `JobManager.get()`의 최신 `compressed`와 revision을 사용한다. 이후 편집은 기존 실행의 스냅샷을 바꾸지 않는다.
+- 원문·UTF-8 SHA-256·revision·확정 시각·줄/장면 대응·전체 설정·검토 확인·생성 당시 진단을 함께 보관한다. 장면 수를 5로 고정하지 않으며 빈 줄만 제외하고 다른 줄의 공백은 보존한다.
+- 미정이었던 검토 정책은 **명시적 확인**으로 구현했다. needs_review/failed 또는 검증 사유가 남으면 체크를 요구하고 원래 진단을 유지한다. 편집 시 체크를 해제한다.
+- 설정은 명세 관찰값을 타입 그대로 확정한다. 사용자 화면에서는 제목·자동 대체 여부를 변경하며 나머지 전체 기본값도 DB에 함께 저장한다.
+
+### 저장·복원·중복 방지
+
+DB: **`.runtime/infox-runs.sqlite3`**. 기존 `.runtime/` 제외 규칙을 사용하며 자격·쿠키·서명 URL을 넣지 않는다. 대본과 실행 기록이 있으므로 DB 자체를 Git에 추가하지 않는다. `ResultStore.write_text()` 허용 목록은 그대로다.
+
+SQLite `BEGIN IMMEDIATE` 안에서 실행과 intent 별칭을 함께 커밋한다. 부분 저장 실패는 롤백하고 성공으로 응답하지 않는다. 여러 동시 요청도 같은 스냅샷이면 같은 실행을 반환한다. Windows에서 삭제 중인 SQLite journal을 `Path.resolve()`로 검사하면 일시적으로 extended-length 경로가 반환되어 오탐했으므로, 안전한 부모 아래 파일의 symlink/junction 여부를 직접 검사한다.
+
+같은 intent는 같은 실행으로 복원하며 다른 내용으로 재사용하면 409다. 별도 intent의 같은 job·revision·본문 해시·설정도 기본적으로 기존 실행에 연결한다. 동일 대본의 의도적인 새 실행은 `new_run=true`로 구분하되 기존 실행의 확실한 종료와 미확인 접수 부재를 요구한다. 재제작 UI는 아직 추가하지 않았다.
+
+응답을 잃은 화면은 요청 본문(intent/revision/설정/확인값)을 sessionStorage에 보관하고 그대로 다시 확인한다. 이후 편집된 대본이나 빈 대본으로 원래 요청을 바꿔 보내지 않는다. 최신 실행 조회는 재시작 후 진행 상태·외부 ID를 복원하며 POST를 자동 실행하지 않는다. 복원 GET 동안 설정 입력을 잠가 사용자의 수정값이 뒤늦은 응답으로 덮이지 않게 한다.
+
+### 3단계 작업자가 먼저 할 일
+
+1. `RunService.prepare()`가 반환한 **prepared** 실행을 사용한다. 이 상태는 로컬 확정이며 제작 접수가 아니다. `creation_body(record.snapshot)`의 본문을 보내고 현재 편집본을 다시 읽어 덮어쓰지 않는다.
+2. 생성 POST 전 `store.begin_request(run_id, 'project', expected_version=...)`를 커밋한다. 그 뒤 외부 요청은 **한 번만** 보낸다. 성공의 영상 ID를 `record_outcome(..., 'accepted', external_id=..., expected_version=...)`로 저장한다.
+3. 확보한 video_id로 `begin_request(..., 'generation')` 후 제작 시작 GET을 한 번 보낸다. 반환 task ID를 별도로 저장한다. `client._read()`의 조회 재시도를 이 쓰기에 사용하지 않는다.
+4. **intent_recorded/unknown**은 `requires_reconciliation=true`다. 의도 커밋 직후 전송 전에 죽은 경우와 외부 접수 뒤 응답을 잃은 경우를 로컬 기록만으로 구분할 수 없다. 서버 상태를 확인하고 unknown을 해소하며, 같은 operation의 begin을 다시 호출하거나 새 프로젝트를 자동 생성하지 않는다.
+5. store의 receipt CAS는 이미 있지만 생성 이후 진행 이벤트/오류/완료 확인의 추가 stage 저장 메서드, 서비스 생명주기와 추적 태스크는 아직 없다. 3단계에서 동일 version 계약으로 확장한다. 범용 임의 JSON 갱신 API를 노출하지 않는다.
+6. 일반 API와 SSE 인증은 1단계 어댑터를 사용한다. 현재 영상 채널과 현재 taskid의 실제 completed·실패 본문을 단일 생성에서 확인하고, 전송 대본·장면·음성·자막 준비 상태를 검증한다. connection/connected, progress=100, can_edit=true를 완료로 사용하지 않는다.
+7. 화면의 전송본 준비에 실제 제작 버튼·진행 UI를 연결한다. 전송본 revision과 현재 편집본 차이, 로컬 확정과 외부 접수를 계속 구분한다. 접수/추적은 긴 단일 HTTP 응답을 기다리게 하지 않고 실행 ID로 조회한다.
+
+2단계는 외부 쓰기 요청을 실행하지 않았다. `record_outcome`으로 넣은 테스트용 영상/작업 ID는 임시 DB의 통제된 검증값이며 실제 제작이 아니다. 기본 본문 설정은 기존 HAR와 1단계의 실제 조회 근거에 맞춘다.
+
+### 2단계 검증·리뷰·전달
+
+- 전용 백엔드 회귀: **17 passed**. 최신 편집본·설정/장면 일치, 이후 편집 분리, 검토 확인, revision 충돌, 빈 대본, 동시 클릭, 의도/접수/외부 ID 재로드, SQLite 실패 롤백, 안전한 입력/오류·접근 가드를 확인했다.
+- 전체 백엔드: **473 passed**, 기존 경고 3개. Windows PowerShell 모듈 경로 환경은 위 재현 절차와 같다.
+- 프런트엔드: **58 passed**. `vue-tsc` 타입 검사와 Vite 프로덕션 빌드 성공.
+- 독립 코드 리뷰: Critical/Important 문제 없음. 초기 실행 복원 중 설정을 수정하면 늦은 응답이 덮는 Minor race를 재현 테스트로 확인하고 복원 중 설정 잠금으로 수정했다.
+- 실제 Edge/Chromium과 로컬 API: 편집 저장 후 확정, 검토 체크, 중복 클릭 재사용, 새 JobManager/RunStore의 디스크 복원, 이후 편집과 스냅샷 분리, 390/1440px 레이아웃을 확인했다. 외부 브라우저 요청은 0회다. 모든 테스트 자료는 임시 프로젝트의 표시용 대본이다.
+- 기존 미커밋 루트 README·런처·출력물은 2단계에서도 보존하고 커밋에서 제외한다. 변경된 구현·검증·문서 파일만 origin/master에 전달한다.

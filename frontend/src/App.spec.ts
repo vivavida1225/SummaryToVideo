@@ -48,6 +48,13 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
+function makeInfoxRun(revision = 0, text = '원본') {
+  return { id: 'a'.repeat(32), stage: 'prepared', version: 0, requires_reconciliation: false,
+    snapshot: { revision, text, scenes: [{ text }], settings: { title: '시황 영상', template_id: 1786,
+      voice_id: 'e9d18b28-937c-42ae-8fe0-de92517c233f', voice_speed: '1.0', auto_replace: true } },
+    project: { state: 'not_sent' }, generation: { state: 'not_sent' }, video_id: null, task_id: null }
+}
+
 function requestPath(input: RequestInfo | URL): string {
   return typeof input === 'string' ? input : input instanceof URL ? input.pathname : new URL(input.url).pathname
 }
@@ -74,6 +81,165 @@ async function finishBootstrap() {
 }
 
 describe('App', () => {
+  it('InfoX 확정은 편집 저장 후 최신 revision을 사용하며 중복 클릭을 막는다', async () => {
+    sessionStorage.setItem('market-compressor.job-id', 'job-1')
+    const original = makeJob({ state: 'completed', compressed: '원본', revision: 0 })
+    let save!: (response: Response) => void
+    let prepare!: (response: Response) => void
+    const requests: Array<Record<string, unknown>> = []
+    const fetchMock = installBootstrapFetch((path, init) => {
+      if (path.endsWith('/compressed')) return new Promise(resolve => { save = resolve })
+      if (path.endsWith('/infox-runs')) {
+        if (init.method !== 'POST') return jsonResponse({ run: null })
+        requests.push(JSON.parse(String(init.body)))
+        return new Promise(resolve => { prepare = resolve })
+      }
+      return jsonResponse(original)
+    })
+    render(App)
+    const input = await screen.findByRole('textbox', { name: '압축 결과' })
+    await waitFor(() => expect(input).not.toHaveAttribute('readonly'))
+    await fireEvent.update(input, '최신 편집')
+    const button = await screen.findByRole('button', { name: 'InfoX 전송본 확정' })
+    await fireEvent.click(button)
+    await fireEvent.click(button)
+    expect(requests).toHaveLength(0)
+    save(jsonResponse({ ...original, compressed: '최신 편집', revision: 1, edited_at: 'now' }))
+    await waitFor(() => expect(requests).toHaveLength(1))
+    expect(requests[0]).toMatchObject({ revision: 1, review_confirmed: false })
+    expect(typeof requests[0].intent_id).toBe('string')
+    prepare(jsonResponse(makeInfoxRun(1, '최신 편집'), 201))
+    expect(await screen.findByText('전송본이 확정되었습니다.')).toBeInTheDocument()
+    const post = fetchMock.mock.calls.find(([path, init]) => requestPath(path).endsWith('/infox-runs') && init?.method === 'POST')
+    expect(new Headers(post?.[1]?.headers).get('X-App-Token')).toBe('session-token')
+  })
+
+  it.each(['composition', 'save_failure', 'revision_conflict'])('InfoX 확정은 %s 상태에서 실행 기록을 만들지 않는다', async mode => {
+    sessionStorage.setItem('market-compressor.job-id', 'job-1')
+    const original = makeJob({ state: 'completed', compressed: '원본', revision: 0 })
+    let prepares = 0
+    installBootstrapFetch((path, init) => {
+      if (path.endsWith('/compressed')) return jsonResponse({ detail: '저장 거절' }, mode === 'revision_conflict' ? 409 : 503)
+      if (path.endsWith('/infox-runs')) {
+        if (init.method === 'POST') prepares++
+        return jsonResponse({ run: null })
+      }
+      return jsonResponse(original)
+    })
+    render(App)
+    const input = await screen.findByRole('textbox', { name: '압축 결과' })
+    await waitFor(() => expect(input).not.toHaveAttribute('readonly'))
+    if (mode === 'composition') await fireEvent.compositionStart(input)
+    await fireEvent.update(input, '수정 중')
+    const button = screen.getByRole('button', { name: 'InfoX 전송본 확정' })
+    await fireEvent.click(button)
+    await waitFor(() => expect(button).not.toHaveTextContent('확정하는 중'))
+    expect(prepares).toBe(0)
+    expect(input).toHaveValue('수정 중')
+  })
+
+  it('검토 필요 대본은 명시적 확인이 있어야 InfoX 전송본을 확정한다', async () => {
+    sessionStorage.setItem('market-compressor.job-id', 'job-1')
+    const job = makeJob({ state: 'needs_review', compressed: '검토 대본', validation_issues: ['한자 포함'] })
+    let body: Record<string, unknown> | undefined
+    installBootstrapFetch((path, init) => {
+      if (path.endsWith('/infox-runs')) {
+        if (init.method !== 'POST') return jsonResponse({ run: null })
+        body = JSON.parse(String(init.body))
+        return jsonResponse(makeInfoxRun(0, '검토 대본'), 201)
+      }
+      return jsonResponse(job)
+    })
+    render(App)
+    const checkbox = await screen.findByRole('checkbox', { name: '검토 사유를 확인하고 이 대본을 사용합니다' })
+    const button = screen.getByRole('button', { name: 'InfoX 전송본 확정' })
+    expect(button).toBeDisabled()
+    await waitFor(() => expect(checkbox).toBeEnabled())
+    await fireEvent.click(checkbox)
+    await waitFor(() => expect(button).toBeEnabled())
+    await fireEvent.click(button)
+    await waitFor(() => expect(body?.review_confirmed).toBe(true))
+    expect(screen.getByText('한자 포함')).toBeInTheDocument()
+  })
+
+  it('InfoX 응답 유실 후 새 편집이 있어도 같은 intent와 revision으로 결과를 확인한다', async () => {
+    sessionStorage.setItem('market-compressor.job-id', 'job-1')
+    const job = makeJob({ state: 'completed', compressed: '원본', revision: 0 })
+    const requests: Array<Record<string, unknown>> = []
+    installBootstrapFetch((path, init) => {
+      if (path.endsWith('/compressed')) return jsonResponse({ ...job, compressed: '추가 편집', revision: 1, edited_at: 'now' })
+      if (path.endsWith('/infox-runs')) {
+        if (init.method !== 'POST') return jsonResponse({ run: null })
+        requests.push(JSON.parse(String(init.body)))
+        if (requests.length === 1) throw new TypeError('network disconnected')
+        return jsonResponse(makeInfoxRun(), 200)
+      }
+      return jsonResponse(job)
+    })
+    render(App)
+    await waitFor(() => expect(screen.getByRole('button', { name: 'InfoX 전송본 확정' })).toBeEnabled())
+    await fireEvent.click(screen.getByRole('button', { name: 'InfoX 전송본 확정' }))
+    const retry = await screen.findByRole('button', { name: '확정 결과 다시 확인' })
+    await fireEvent.update(screen.getByRole('textbox', { name: '압축 결과' }), '추가 편집')
+    await fireEvent.click(retry)
+    await waitFor(() => expect(requests).toHaveLength(2))
+    expect(requests[1]).toEqual(requests[0])
+    expect(await screen.findByText('현재 편집본 또는 설정이 확정본과 다릅니다.')).toBeInTheDocument()
+  })
+
+  it('복원한 InfoX 실행은 조회만 하며 불명확한 접수를 다시 보내지 않는다', async () => {
+    sessionStorage.setItem('market-compressor.job-id', 'job-1')
+    let posts = 0
+    installBootstrapFetch((path, init) => {
+      if (path.endsWith('/infox-runs')) {
+        if (init.method === 'POST') posts++
+        return jsonResponse({ run: { ...makeInfoxRun(), stage: 'creating_project', requires_reconciliation: true } })
+      }
+      return jsonResponse(makeJob({ state: 'completed', compressed: '원본' }))
+    })
+    render(App)
+    expect(await screen.findByText('접수 여부 확인이 필요합니다. 기존 실행은 다시 전송하지 않습니다.')).toBeInTheDocument()
+    expect(posts).toBe(0)
+  })
+
+  it('InfoX 응답 유실 후 새로고침하고 대본을 비워도 원래 요청 결과를 확인할 수 있다', async () => {
+    sessionStorage.setItem('market-compressor.job-id', 'job-1')
+    const pending = { intent_id: 'b'.repeat(32), revision: 0, settings: { title: '이전 제목', auto_replace: true },
+      review_confirmed: false, new_run: false }
+    sessionStorage.setItem('market-compressor.infox-pending.job-1', JSON.stringify(pending))
+    let sent: unknown
+    installBootstrapFetch((path, init) => {
+      if (path.endsWith('/infox-runs')) {
+        if (init.method !== 'POST') return jsonResponse({ run: null })
+        sent = JSON.parse(String(init.body))
+        return jsonResponse(makeInfoxRun())
+      }
+      return jsonResponse(makeJob({ state: 'completed', compressed: '', revision: 1 }))
+    })
+    render(App)
+    const button = await screen.findByRole('button', { name: '확정 결과 다시 확인' })
+    await waitFor(() => expect(button).toBeEnabled())
+    await fireEvent.click(button)
+    await waitFor(() => expect(sent).toEqual(pending))
+  })
+
+  it('InfoX 실행 복원 중에는 제목과 대체 설정 편집을 잠근다', async () => {
+    sessionStorage.setItem('market-compressor.job-id', 'job-1')
+    let restore!: (response: Response) => void
+    installBootstrapFetch(path => {
+      if (path.endsWith('/infox-runs')) return new Promise(resolve => { restore = resolve })
+      return jsonResponse(makeJob({ state: 'completed', compressed: '원본' }))
+    })
+    render(App)
+    await waitFor(() => expect(screen.getByRole('combobox', { name: '시작 모델' })).toBeEnabled())
+    const title = screen.getByRole('textbox', { name: 'InfoX 영상 제목' })
+    const replace = screen.getByRole('checkbox', { name: '반도체 즐겨찾기 자동 대체 사용' })
+    expect(title).toBeDisabled()
+    expect(replace).toBeDisabled()
+    restore(jsonResponse({ run: makeInfoxRun() }))
+    await waitFor(() => expect(title).toBeEnabled())
+    expect(replace).toBeEnabled()
+  })
   it('선택한 공급자의 키 상태를 표시한다', async () => {
     installBootstrapFetch(() => jsonResponse({}, 404))
     render(App)
