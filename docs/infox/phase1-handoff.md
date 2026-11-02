@@ -386,3 +386,74 @@ SQLite `BEGIN IMMEDIATE` 안에서 실행과 intent 별칭을 함께 커밋한�
 ```
 
 기존 README·scripts/launch.ps1·toggle.cmd·outputs 변경은 보존하고 이번 커밋에서 제외한다. 원본 HAR/편집기 코드/원격 JSON/자격/DB/서명 URL도 추가하지 않는다.
+
+## 6단계 추가 기록: 저장 경로 구현·통제 검증, 실제 무변경 확인
+
+**6단계 저장·복구·서버 적용 검증 경로를 구현했다. 실제 문제 에셋 교체 저장과 편집기 재생까지 완료했다는 뜻은 아니다.** 기존 실제 실행은 기업명 검출 0, 자동 대체 false, 선택 0개다. 이 실행에는 별도 무변경 경로만 수행했고 원격 영상 쓰기는 0회다. 실제 교체 저장·충돌 응답·교체 후 재조회·반복/잘림/빈 구간/소재 원음/TTS/자막/새로고침 후 재생은 여전히 실제 검증 조건으로 남는다.
+
+### 구현 위치와 진입점
+
+| 위치 | 책임 |
+| --- | --- |
+| `backend/infox/save_models.py` | 엄격한 `AssetSave` 모델, 저장 의도/결과/원격 버전/검증 지문, 비밀 없는 오류 코드 |
+| `backend/infox/save_store.py`, `store.py`, `run_models.py` | 저장 전용 typed CAS, 계획/검사 잠금, 배치별 provenance와 검증 결과의 원자적 기록, 기본값으로 기존 DB 호환 |
+| `backend/infox/saving.py` | 최신 상태 대조, 고정 후보 재조회, 제안본 재구성/보존 검사, 저장 1회, 서버 재조회와 응답 유실/충돌 조사 |
+| `backend/infox/client.py` | `save_video_context(video_id, body)`: POST를 조회 재시도와 분리, HTTP/status/새 버전 검증 |
+| `backend/infox/manager.py`, `backend/app.py` | `save()`·저장 단계 start/recover 라우팅, 비동기 `POST /api/infox-runs/{run_id}/save-assets`, 새 자동 제작의 저장 연결 |
+| `frontend/src/components/InfoXAssetSave.vue`, `App.vue`, `api.ts`, `types.ts` | 저장·재조회·검증 상태/원인, 기존 계획 저장과 기존 저장 조사, 미저장 계획/서버 검증/실제 재생의 구분 |
+| `tests/test_infox_save.py`, `test_infox_save_recovery.py` | 전용 통제 검증; 기존 생성/검사 테스트는 무변경 검증까지 이어지는 결과로 갱신 |
+| `tests/infox_save_live.py`, `docs/infox/phase6-live-verification.json` | 기존 marker 실행만 사용하는 쓰기 금지 실제 검증과 민감 값을 제거한 근거 |
+
+기존 검사와 계획 API는 읽기 전용이다. 기존 `replacement_planned/ready` 기록에는 **검증한 교체 계획 서버 저장**, `not_needed`에는 **교체 불필요 상태 서버 재확인**을 제공한다. 새 제작은 완료/시안 검증 → 검사 → 준비된 계획 → 저장/재조회까지 같은 백엔드 태스크로 진행한다. 자동 대체가 꺼져 있어도 검출 0건이면 `not_needed`를 만들어 무변경 검증을 수행한다. 검출이 있는데 자동 대체가 꺼져 있거나 검사 불가·선택 중·보류 상태이면 저장 완료로 처리하지 않는다.
+
+### 실제 조회 및 서비스 소스에서 확인한 매핑
+
+1. 기존 실제 영상의 `videostate`에는 최상위 `video`, `context`, `updated_at`이 있고 `contextData` 키는 없다. `context`는 `data`, 음성/제작 설정 등을 포함한 객체였다. 원본 내용과 ID는 근거 JSON에 복사하지 않았다.
+2. Git 제외 `.runtime/infox-source/69997-d8cec8a33fa9c243.js`의 `fetchVideoState`는 `response.context`를 `SET_CONTEXT_DATA`에 넘기고, 저장 hook은 `videoState.context`를 읽는다. `20700-31e582d53acc3cba.js`의 `saveVideoAndContextData`는 이를 `contextData`로 보낸다. 따라서 저장 매핑은 **`video → video`, `context → contextData`, `updated_at → updatedAt`**이다. 생성 시 `context` 본문으로 다시 만들지 않는다.
+3. `save_body()`는 최신 context 전체를 깊은 복사로 보존한다. context 키가 없거나 미지원 자료형이면 `context_invalid`다. 명시적 null은 API 어댑터의 null 계약대로 보존하되 누락을 null/빈 객체로 추정하지 않는다. 이번 실제 조회의 context는 null이 아니었다.
+4. 성공 응답 계약은 기존 명세/HAR의 **HTTP 200, `status="Video updated"`, 새 `updated_at`**이다. 클라이언트는 이를 엄격히 검사하고 요청 버전보다 새 시각인지 확인한다. 현재 편집기 저장 조정 코드가 **HTTP 409**를 충돌로 처리함도 확인했다. **이번 실제 실행에서 성공 저장이나 409를 발생시킨 것은 아니며 실제 충돌 본문/다른 충돌 코드까지 확정하지 않았다.**
+
+### 저장과 재조회 계약
+
+- 실제 저장은 `replacement_planned`, `replacement_plan.state=ready`, 모든 보존 검사 통과를 출발점으로 한다. `begin_save`는 최신 확인 단계만 CAS로 기록한다. 같은 영상의 최신 source_version과 전체 `state_fingerprint`, 시안 준비, 검사 결과/ROOT 연결/파일·구간 참조를 대조한다. 계획 이후 버전이나 내용이 달라졌으면 오래된 전체 JSON을 덮어쓰지 않는다.
+- 고정 후보를 반도체 `favorites_only=true` 일반 영상의 전체 페이지에서 다시 찾고 동일 스키마·구간 접근을 확인한다. 기업명으로 후보를 다시 거르지 않는다. 같은 후보로 `make_choices()`와 `apply_replacements()`를 재실행하고 기존 result_fingerprint 및 독립 보존 검사를 모두 통과해야 한다. 서명 URL만 현재 검색 응답에서 메모리에 보충하며 다른 후보로 변경하지 않는다.
+- **모든 대상은 최신 전체 video/context를 한 POST에 저장한다.** 배치별 중간 저장/후속 저장이 필요하지 않다. `begin_save_request(request_version, result_url_fingerprint, expected_version)`가 저장 intent와 최신 원격 응답의 정확한 updated_at 문자열, URL 자원 지문을 먼저 커밋한 다음에만 POST한다. 성공 응답 버전은 `record_save_outcome`에 CAS로 보관한다. 향후 복수 저장으로 확장한다면 직전 응답/재조회의 버전에서 새 typed intent를 연결해야 하며 현재 operation을 재사용할 수 없다.
+- 저장 POST는 401/409/429/5xx/타임아웃/잘못된 응답에서도 자동 반복하지 않는다. `accepted`, `unknown`, `rejected`를 기록한 다음 반드시 같은 영상의 `videostate`를 읽는다. 프로세스 중단의 `intent_recorded`도 서버부터 조사한다. source가 그대로 보여도 처리 중인 요청일 수 있으므로 unknown을 미전송으로 되돌리거나 재저장하지 않는다.
+- 재조회에서는 서버 updated_at을 원래 요청의 timestamp로 정규화한 뒤 예상 결과 지문과 비교한다. **서버 갱신 시각이 원래 result_fingerprint와 같아야 한다고 가정하지 않는다.** 응답 버전이 있으면 재조회 버전과 같아야 하고, 원격 버전은 원래 요청보다 새로워야 한다. 전체 내용 비교가 원래 정상 에셋·대본/TTS/자막·배치/크롭/효과·장면/전체 길이·context·무관한 필드의 보존을 확인한다.
+- 별도 `result_url_fingerprint`는 전체 데이터의 알려진 서명 URL에서 쿼리 서명만 제외하고 호스트·경로·필드 위치를 보존한다. 선택 구간의 미리보기/영상 URL도 후보의 정확한 bucket+파일 경로로 검증한다. 다른 구간/썸네일/호스트로 바뀌거나 정상 소재 URL이 달라지면 검증을 거절한다. URL 원문은 DB에 보관하지 않는다.
+- 원격 적용과 보존이 확인된 뒤에만 `finish_save(...expected_version=...)`가 `saved_verified`, 검증 버전/지문과 **배치별 `FavoriteReplacement`를 같은 트랜잭션으로** 기록한다. 새 VideoLayer/MediaLayer의 결과 item_index와 clip-local trim 참조를 이력에 사용한다. 이후 검사에서 같은 배치·구간은 즐겨찾기 예외로 인식한다. 반복 조회/복구는 이력을 중복 추가하지 않는다.
+- `not_needed`는 최신 원격 데이터·검사·대본 준비·무변경 보존을 다시 확인한 **`unchanged_verified`**다. 저장 receipt는 `not_sent`, 이력 추가는 0개다. 두 검증 완료 상태의 run stage는 `ready_for_editor`이며 자동 브라우저 이동이나 실제 재생 완료를 뜻하지 않는다.
+- `replacing_assets/saving_assets/verifying_assets` 및 저장 중 오류는 `start/recover`에서 저장 조사 경로로 간다. 생성/제작 receipt와 video/task ID는 유지한다. 저장 검증에 들어간 계획은 재검사/재선택으로 덮어쓸 수 없다. 경쟁 관리자에서 CAS가 바뀌면 외부 요청을 다시 보내지 않으며 기존 intent의 로컬 결과 저장만 제한적으로 재시도한다.
+
+### 검증 결과와 근거의 한계
+
+- 6단계 통제 테스트는 단일 사진→영상·기존 영상 교체·혼합 묶음·다중 레이어·짧은/긴 후보, 정상 항목/순서/슬롯·배치/크롭/효과·ROOT·TTS/자막/context 보존을 검증한다. wrong clip/preview URL·정상 소재 URL 변경은 실패하고 서명만 갱신하면 통과한다. 이는 실제 편집기의 재생을 증명하지 않는다.
+- 저장 전 최신 데이터/후보 변경, disabled/선택 중/보류 계획 차단, 엄격한 응답 상태/버전, 409·응답 유실 후 읽기, intent/accepted/verifying 중단·재시작, 두 관리자 CAS, 재조회 실패 후 같은 영상 복구, 무변경 경로와 API 보호를 검증한다.
+- 실제 로컬 API + Edge Chromium은 통제 클라이언트로 저장/재조회/검증 단계 표시·혼합 계획 저장·이력 기록·새로고침 후 유지·390/1440px 레이아웃과 외부 브라우저 요청/자동 이동 0회를 확인한다. 실제 InfoX 편집기 재생 시험이 아니다.
+- 실제 확인: **2026-11-02 14:36 한국 시간** 최종 재확인에서 기존 marker 실행으로 context 매핑과 무변경 재조회를 확인했다. 같은 스냅샷/영상/작업/receipt·전체 원격 내용·서버 버전·기존 이력을 유지했다. 테스트 hit 추가, 새 프로젝트, 제작 재시작, 영상 저장은 모두 0회다. 근거는 `phase6-live-verification.json`이다.
+- 독립 코드 리뷰: Critical 0, Important 2. 잘못된 서명 URL 자원을 허용하던 재조회와 자동 대체 false/검출 0건의 무변경 검증 미진입을 실패 테스트로 재현한 뒤 수정했다.
+- Minor 보류: 저장 POST 401/403 뒤 조회가 성공하면 `save_rejected`로 표시할 수 있고, 409 뒤 조회까지 실패하면 당장의 `read_failed`가 충돌 원인을 가릴 수 있다. receipt/중복 방지/서버 조사와 저장 보류는 유지한다. 쓰기 거절 원인을 별도 영속 필드로 보존하는 개선은 후속 작업으로 남긴다.
+
+최종 검증: **전체 백엔드 593 passed**(기존 의존성 경고 3개), **6단계 전용 42 passed**, **프런트엔드 71 passed**, vue-tsc 타입 검사와 Vite 프로덕션 빌드 성공. 커밋/푸시 결과는 최종 전달 결과를 따른다. 재현 명령:
+
+```powershell
+$env:PSModulePath = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\Modules;$env:ProgramFiles\WindowsPowerShell\Modules"
+.venv/Scripts/python.exe -m pytest -q
+.tools/node/node.exe frontend/node_modules/vitest/vitest.mjs run --root frontend
+.tools/node/node.exe frontend/node_modules/vue-tsc/bin/vue-tsc.js -b frontend/tsconfig.json
+.tools/node/node.exe frontend/node_modules/vite/bin/vite.js build frontend
+.venv/Scripts/python.exe -m tests.infox_runs_browser_smoke
+# 기존 marker의 not_needed 실행만 허용. 어떤 영상 쓰기도 허용하지 않는다.
+.venv/Scripts/python.exe -m tests.infox_save_live
+```
+
+### 남은 제약과 7단계 작업자의 진입점
+
+1. 7단계 자동 이동 입력은 stage만 보지 말고 `asset_save.state in ('saved_verified','unchanged_verified')`와 `requires_reconciliation=false`까지 확인한다. 수동 editor_url 링크는 유지하며 대기 탭·팝업 차단·닫힌 탭·로그인 만료·동일 영상 한 번 열기는 7단계에서 구현한다. 자동 이동 기능은 추가하지 않았다.
+2. 실제 교체 저장/충돌/적용 재조회/편집기 재생의 **6단계 실제 완료 조건이 아직 남아 있다.** 현재 실행의 검사 결과나 스냅샷을 조작하거나 검증 hit를 서버에 쓰면 안 된다. 실제 변경 대상과 승인된 실행 조건이 생겼을 때만 그 같은 영상/작업에서 검증한다. 현재 marker를 삭제해 새 검증 프로젝트를 만들지 않는다.
+3. 30fps·명시적 scene.durationInFrames 계약, 일반 영상/고정 첫 후보 재사용 정책, 비어 있지 않은 uservideo 미지원은 유지한다. 실제 편집기에서 짧은 구간 반복/빈 구간·긴 구간 잘림·음소거·TTS/자막·크롭과 새로고침 후 유지/재생을 각각 기록해야 한다. 현 자동 변환의 시간 설정과 통제 검증을 실제 재생 통과로 대체하지 않는다.
+4. 버전이 바뀐 source, unknown 미적용, conflict, 미지원 서버 정규화는 `needs_attention`으로 남긴다. 자동 rebase/다른 후보 선택/동일 intent 재전송은 없다. 새 원격 편집을 기반으로 다시 계획해야 하는 경우에는 명시적 새 의도와 CAS 정책을 설계해야 한다.
+5. 저장 중 stage의 재개는 구현했지만 **자동 검사/후보 선택 도중 중단**은 기존 읽기 전용 audit/plan 복구로 이어져 준비된 계획에서 멈출 수 있다. 화면의 저장 동작으로 계속할 수 있으며, 완전한 자동 연속 복구는 7단계에서 자동 실행 의도를 별도 영속화해 마무리한다. 기존 수동 검사/계획의 읽기 전용 계약을 깨지 않는다.
+6. `saving.py`의 보수적인 전체 결과/URL 자원 지문과 버전 비교는 예상치 못한 서버 필드 추가·변환도 보류한다. 실제 서비스가 정규화하는 필드가 확인되면 근거와 회귀 테스트를 갖춰 허용 범위를 좁게 확장한다. 서버 원문/비밀/서명 URL을 일반 로그나 Git에 남기지 않는다.
+
+기존 미커밋 README·scripts/launch.ps1·toggle.cmd·outputs와 .runtime의 자격/원격 자료는 이번 커밋에 포함하지 않는다.

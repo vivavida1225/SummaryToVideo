@@ -58,6 +58,10 @@ export const api = {
     return request(`/api/infox-runs/${encodeURIComponent(id)}/start`, { method: 'POST' })
   },
 
+  saveInfox(id: string): Promise<InfoXRun> {
+    return request(`/api/infox-runs/${encodeURIComponent(id)}/save-assets`, { method: 'POST' })
+  },
+
   prepareInfox(id: string, input: InfoXPrepareInput): Promise<InfoXRun> {
     return request(`/api/jobs/${encodeURIComponent(id)}/infox-runs`, { method: 'POST', body: JSON.stringify(input) })
   },

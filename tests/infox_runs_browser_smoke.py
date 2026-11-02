@@ -1,6 +1,8 @@
 """Real local API + Chromium check for phases 2/3. External InfoX is controlled."""
 
 import shutil
+import asyncio
+import copy
 import socket
 import tempfile
 import threading
@@ -91,24 +93,37 @@ def main():
                 # backend manager owns admission and tracking independently of UI.
                 run_manager = app.state.infox_manager
                 fake = FakeClient(run_manager.store, run_manager.store.get(record['id']))
+                original_read = fake.video_state
+                async def incomplete_assets(video_id):
+                    value = await original_read(video_id)
+                    # Leave metadata incomplete, so automation correctly stops
+                    # before any save. Subsequent read-only audit repairs it.
+                    for scene in value['video']['scenes']:
+                        scene['rootShape']['layers']['media']['props']['media'].pop('title', None)
+                    return value
+                fake.video_state = incomplete_assets
                 run_manager.client_factory = lambda: fake
                 start_requests = []
                 page.on('request', lambda req: start_requests.append(req.url) if req.url.endswith('/start') else None)
                 page.get_by_role('button', name='확정본으로 InfoX 제작 시작', exact=True).click()
-                expect(page.get_by_text('기업 에셋 검사 완료 · 교체는 다음 단계입니다.', exact=True)).to_be_visible(timeout=10000)
+                expect(page.get_by_text('확인이 필요합니다. 기존 실행 상태를 확인하세요.', exact=True)).to_be_visible(timeout=10000)
                 expect(page.get_by_role('region', name='기업 에셋 검사 결과')).to_be_visible()
                 link = page.get_by_role('link', name='InfoX 편집 화면 수동 열기')
                 expect(link).to_have_attribute('href', 'https://infox2.infomaxai.com/studio/library/videos/video-1?chatboxView=script')
                 assert fake.calls == ['project', 'generation']
                 assert run_manager.store.get(record['id']).snapshot.text == edited
                 page.reload(wait_until='networkidle')
-                expect(page.get_by_text('기업 에셋 검사 완료 · 교체는 다음 단계입니다.', exact=True)).to_be_visible()
+                expect(page.get_by_text('확인이 필요합니다. 기존 실행 상태를 확인하세요.', exact=True)).to_be_visible()
                 assert len(start_requests) == 1 and fake.calls == ['project', 'generation']
                 # Reinspection changes only asset metadata, never the transmission snapshot.
-                original_read = fake.video_state
                 complete_metadata = False
+                saved_state = None
                 async def problem_assets(video_id):
+                    if saved_state is not None:
+                        await asyncio.sleep(1.5)
+                        return copy.deepcopy(saved_state)
                     value = await original_read(video_id)
+                    value['context'] = {'type':'text','data':{'inputText':edited}}
                     scene = value['video']['scenes'][0]
                     scene['rootShape'] = {'layers': {'ROOT': {'child': ['assigned']}, 'assigned': layer({
                         'title': '오래된 삼성 템플릿 제목', 'image_files': [image('hit.jpg'), image('neutral.jpg'), image('missing.jpg')]})}}
@@ -145,16 +160,36 @@ def main():
                 assert run_manager.store.get(record['id']).replacement_plan.selections[0].candidate == chosen
                 assert run_manager.store.get(record['id']).favorite_replacements == ()
                 assert fake.calls == ['project','generation'] and len(start_requests) == 1
+                saves = []
+                async def save_video_context(video_id, body):
+                    nonlocal saved_state
+                    assert run_manager.store.get(record['id']).asset_save.receipt_state == 'intent_recorded'
+                    saves.append(copy.deepcopy(body))
+                    await asyncio.sleep(1.5)
+                    saved_state = await problem_assets(video_id)
+                    saved_state.update(video=copy.deepcopy(body['video']), context=copy.deepcopy(body['contextData']),
+                                       updated_at='2026-11-02T02:00:00Z')
+                    return saved_state['updated_at']
+                fake.save_video_context = save_video_context
+                page.get_by_role('button', name='검증한 교체 계획 서버 저장', exact=True).click()
+                expect(page.get_by_text('편집 데이터를 저장하는 중…', exact=True)).to_be_visible()
+                expect(page.get_by_text('서버를 다시 읽어 적용·보존 결과를 확인하는 중…', exact=True)).to_be_visible()
+                expect(page.get_by_text('서버 저장·재조회 검증 완료', exact=True)).to_be_visible(timeout=10000)
+                assert len(saves) == 1 and len(run_manager.store.get(record['id']).favorite_replacements) == 1
+                page.reload(wait_until='networkidle')
+                expect(page.get_by_text('서버 저장·재조회 검증 완료', exact=True)).to_be_visible()
+                assert len(saves) == 1 and fake.calls == ['project','generation']
+                expect(page.get_by_text('교체 계획 검증 완료 · 서버에는 저장하지 않았습니다.', exact=True)).not_to_be_visible()
                 # Verify layout and capture only synthetic test data.
                 for width in (390, 1440):
                     page.set_viewport_size({'width': width, 'height': 1000})
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                     page.get_by_role('heading', name='영상 전송본 준비').scroll_into_view_if_needed()
-                    page.screenshot(path=str(root / f'.runtime/infox-phase5-{width}.png'), full_page=True)
+                    page.screenshot(path=str(root / f'.runtime/infox-phase6-{width}.png'), full_page=True)
                 assert not errors, errors
                 assert not external_requests, 'Unexpected external browser requests'
                 browser.close()
-            print('PASS: snapshot/review, one-shot generation, audit/reinspection, fixed favorite plan, mixed local conversion, reload and same selection, responsive layout, no remote asset saves or external browser requests')
+            print('PASS: snapshot/review, one-shot generation, audit/reinspection, fixed favorite mixed plan, controlled save/read/verify, persisted history after reload, responsive layout, no external requests or navigation')
         finally:
             server.should_exit = True
             thread.join(timeout=10)

@@ -17,6 +17,8 @@ from .asset_models import AssetAudit
 from .assets import audit_assets
 from .planner import prepare_plan
 from .plan_models import ReplacementPlan, PreservationChecks
+from .saving import save_plan
+from .save_store import SAVE_STAGES
 
 
 class RunManager:
@@ -29,6 +31,8 @@ class RunManager:
 
     async def start(self, run_id: str, *, recovery: bool = False) -> RunRecord:
         record = self.store.get(run_id)
+        if record.stage in SAVE_STAGES or record.asset_save.state not in ('not_started', 'saved_verified', 'unchanged_verified'):
+            return await self.save(run_id)
         if record.stage in ('draft_ready', 'auditing_assets', 'assets_audited', 'selecting_favorites', 'replacement_planned', 'ready_for_editor', 'failed'):
             return record
         if record.asset_audit.state=='completed' and record.replacement_plan.state=='needs_attention':
@@ -38,6 +42,39 @@ class RunManager:
         if run_id not in self.tasks or self.tasks[run_id].done():
             self.tasks[run_id] = asyncio.create_task(self._execute(run_id, recovery=recovery))
         return record
+
+    async def save(self, run_id: str) -> RunRecord:
+        record = self.store.get(run_id)
+        if record.asset_save.state in ('saved_verified', 'unchanged_verified'):
+            return record
+        if self.active(run_id):
+            if record.stage in SAVE_STAGES:
+                return record
+            raise RunError('save_not_ready')
+        claimed = self.store.begin_save(run_id, expected_version=record.version)
+        self.tasks[run_id] = asyncio.create_task(self._save_execute(claimed))
+        return claimed
+
+    async def _save_execute(self, r):
+        try:
+            async with self.client_factory() as client:
+                await save_plan(self.store, client, r)
+        except asyncio.CancelledError:
+            raise
+        except RunError:
+            return  # Durable intent remains for read-only reconciliation.
+        except Exception:
+            with suppress(RunError):
+                self.store.fail_save(r.id, 'read_failed', expected_version=r.version)
+
+    async def _finish_assets(self, client, r):
+        audited = await self._audit_with_client(client, r)
+        # New automatic runs continue through storage. Explicit audit/plan APIs
+        # remain read-only; existing plans have a dedicated save action.
+        if audited.replacement_plan.state in ('ready', 'not_needed'):
+            claimed = self.store.begin_save(audited.id, expected_version=audited.version)
+            return await save_plan(self.store, client, claimed)
+        return audited
 
     async def audit(self, run_id: str) -> RunRecord:
         record = self.store.get(run_id)
@@ -85,7 +122,9 @@ class RunManager:
             # Protected InfoX endpoints still report its explicit safe 503 error.
             return
         for record in records:
-            if record.stage == 'auditing_assets':
+            if record.stage in SAVE_STAGES:
+                await self.save(record.id)
+            elif record.stage == 'auditing_assets':
                 await self.audit(record.id)
             elif record.stage=='selecting_favorites':
                 await self.plan(record.id)
@@ -108,7 +147,8 @@ class RunManager:
         except Exception:
             report = AssetAudit(state='needs_attention', audited_at=now(), error_code='read_failed')
         recorded=self.store.record_audit(r.id, report, expected_version=r.version)
-        if recorded.asset_audit.state=='completed' and recorded.snapshot.settings.auto_replace:
+        if recorded.asset_audit.state=='completed' and (recorded.snapshot.settings.auto_replace
+                or recorded.asset_audit.counts()['detected'] == 0):
             return await prepare_plan(self.store,client,recorded)
         return recorded
 
@@ -285,7 +325,7 @@ class RunManager:
                 if r.tracking.completion_seen:
                     ready = await self._check(client, r)
                     if ready.stage == 'draft_ready':
-                        await self._audit_with_client(client, ready)
+                        await self._finish_assets(client, ready)
                     return
                 queue = asyncio.Queue(maxsize=512)
                 connected = asyncio.Event()
@@ -299,7 +339,7 @@ class RunManager:
                     ready = await self._track(client, r, queue)
                 # Draft tracking's deadline must not cancel the next stage's read.
                 if ready.stage == 'draft_ready':
-                    await self._audit_with_client(client, ready)
+                    await self._finish_assets(client, ready)
         except asyncio.CancelledError:
             raise  # Receipts/events already durable; shutdown never replays a write.
         except RunError:

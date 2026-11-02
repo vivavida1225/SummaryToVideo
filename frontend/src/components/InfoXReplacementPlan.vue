@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import type { InfoXReplacementPlan } from '../types'
 
-const props = defineProps<{ plan: InfoXReplacementPlan }>()
+const props = defineProps<{ plan: InfoXReplacementPlan; saveStarted?: boolean }>()
 const uniqueSegments = computed(() => new Set(props.plan.selections.map(x => `${x.candidate.id}:${x.candidate.video_id}:${x.candidate.segment}`)).size)
 const verified = computed(() => ['scope_preserved', 'normal_assets_preserved', 'layout_preserved',
   'timing_preserved', 'references_consistent', 'old_active_references_removed'].every(key => props.plan.checks?.[key] === true))
@@ -29,13 +29,13 @@ const errors: Record<string, string> = {
   <section v-if="plan.state !== 'not_started'" class="infox-asset-audit" aria-label="즐겨찾기 교체 계획">
     <h4>즐겨찾기 교체 계획</h4>
     <p v-if="['selecting', 'selected'].includes(plan.state)">후보 선택과 로컬 변환을 확인하는 중…</p>
-    <p v-if="plan.state === 'ready' && verified">교체 계획 검증 완료 · 서버에는 저장하지 않았습니다.</p>
+    <p v-if="plan.state === 'ready' && verified && !saveStarted">교체 계획 검증 완료 · 서버에는 저장하지 않았습니다.</p>
     <p v-if="plan.state === 'not_needed'">기업명 검출 대상이 없어 교체가 필요하지 않습니다. 서버에는 저장하지 않았습니다.</p>
     <p v-if="plan.state === 'disabled'">이 전송본은 자동 대체가 꺼져 있어 후보 선택을 생략했습니다.</p>
     <p v-if="plan.error_code">{{ errors[plan.error_code] ?? '교체 계획을 확인하세요.' }}</p>
     <template v-if="plan.selections.length">
       <p>고정 구간 {{ uniqueSegments }}개 · 대체 대상 {{ plan.selections.length }}개</p>
-      <p>반도체 즐겨찾기에서 선택한 구간을 유지합니다. 실제 저장·재생 확인은 다음 단계입니다.</p>
+      <p>반도체 즐겨찾기에서 선택한 구간을 유지합니다. 저장·적용 결과와 실제 재생 확인을 구분합니다.</p>
       <ul class="infox-asset-items">
         <li v-for="(choice, index) in plan.selections" :key="index">
           <strong>장면 {{ choice.target.scene_index + 1 }}<template v-if="choice.target.item_index != null"> · 사진 {{ choice.target.item_index + 1 }}</template> → {{ choice.candidate.title || '선택한 즐겨찾기 구간' }}</strong>

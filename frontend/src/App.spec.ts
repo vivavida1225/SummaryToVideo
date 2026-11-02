@@ -81,6 +81,29 @@ async function finishBootstrap() {
 }
 
 describe('App', () => {
+  it('저장 요청 응답 유실은 GET으로 확인하고 저장 완료·재생 미확인을 표시한다', async () => {
+    sessionStorage.setItem('market-compressor.job-id', 'job-1')
+    const run = { ...makeInfoxRun(), stage: 'replacement_planned', replacement_plan: { state: 'ready', selections: [] },
+      asset_audit: { state: 'completed', items: [], issues: [] } }
+    let posts = 0
+    installBootstrapFetch((path) => {
+      if (path.endsWith('/save-assets')) { posts++; throw new TypeError('Failed to fetch') }
+      if (path === `/api/infox-runs/${run.id}`) return jsonResponse({ ...run, stage: 'ready_for_editor', tracking_active: false,
+        asset_save: { state: 'saved_verified', receipt_state: 'accepted' } })
+      if (path.endsWith('/infox-runs')) return jsonResponse({ run })
+      if (path === '/api/jobs/job-1') return jsonResponse(makeJob({ state: 'completed', compressed: '원본', revision: 0 }))
+      throw new Error(`unexpected ${path}`)
+    })
+    render(App)
+    const button = await screen.findByRole('button', { name: '검증한 교체 계획 서버 저장' })
+    await waitFor(() => expect(button).toBeEnabled())
+    await fireEvent.click(button)
+    await screen.findByText('서버 저장·재조회 검증 완료', {}, { timeout: 4000 })
+    expect(screen.queryByText('교체 계획 검증 완료 · 서버에는 저장하지 않았습니다.')).not.toBeInTheDocument()
+    expect(screen.queryByText(/교체·저장은 아직 수행하지 않았습니다/)).not.toBeInTheDocument()
+    expect(screen.getByText('교체 전 검사 기록입니다. 이후 저장·적용 결과는 아래 검증 상태에서 확인하세요.')).toBeVisible()
+    expect(posts).toBe(1)
+  })
   it('교체 계획 응답 유실은 POST를 반복하지 않고 고정 후보를 조회한다', async () => {
     sessionStorage.setItem('market-compressor.job-id', 'job-1')
     const run = { ...makeInfoxRun(), stage: 'assets_audited', asset_audit: { state: 'completed', items: [], issues: [] } }

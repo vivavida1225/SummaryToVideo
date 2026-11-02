@@ -7,7 +7,7 @@ boundary separate from the local X-App-Token and future generation operations.
 import asyncio
 import re
 import ssl
-from datetime import date
+from datetime import date, datetime
 from typing import AsyncIterator
 from urllib.parse import unquote, urlsplit
 
@@ -17,6 +17,7 @@ import truststore
 from .config import InfoXCredentials
 from .errors import InfoXError, check_status
 from .sse import SSEEvent, parse_events
+from .save_models import remote_version
 
 
 ORIGIN = 'https://infox2.infomaxai.com'
@@ -75,7 +76,7 @@ class InfoXClient:
         return headers
 
     async def _json_once(self, method: str, path: str, *, body: dict | None = None,
-                         bearer: bool = True) -> dict:
+                         bearer: bool = True, expected_status: int | None = None) -> dict:
         try:
             response = await self._http.request(method, path, json=body, headers=self._headers(bearer=bearer))
         except httpx.TimeoutException:
@@ -83,6 +84,8 @@ class InfoXClient:
         except httpx.HTTPError:
             raise InfoXError('network_error') from None
         check_status(response.status_code)
+        if expected_status is not None and response.status_code != expected_status:
+            raise InfoXError('invalid_response')
         try:
             data = response.json()
         except (ValueError, UnicodeError, RecursionError):
@@ -186,6 +189,27 @@ class InfoXClient:
 
     async def render_logs(self, video_id: str) -> dict:
         return await self._read('GET', f'/infomaxai/videos/video_render_logs/{_identifier(video_id)}')
+
+    async def save_video_context(self, video_id: str, body: dict) -> str:
+        """One attempt only. Caller MUST commit the save intent before entering."""
+        try:
+            if (set(body) != {'video', 'contextData', 'updatedAt'} or not isinstance(body['video'], dict)
+                    or (body['contextData'] is not None and not isinstance(body['contextData'], dict))):
+                raise ValueError('invalid body')
+            remote_version(body['updatedAt'])
+        except (TypeError, ValueError, KeyError):
+            raise InfoXError('configuration_error') from None
+        await self.authenticate()
+        result = await self._json_once('POST', f'/infomaxai/context/update_video_context/{_identifier(video_id)}', body=body,
+                                       expected_status=200)
+        try:
+            version = remote_version(result.get('updated_at'))
+            if (result.get('status') != 'Video updated'
+                    or datetime.fromisoformat(version) <= datetime.fromisoformat(body['updatedAt'])):
+                raise ValueError('invalid acknowledgement')
+            return version
+        except (TypeError, ValueError):
+            raise InfoXError('invalid_response') from None
 
     async def search_favorites(self, *, search: str = '반도체', source: str = 'video',
                                skip: int = 0, limit: int = 50, date_from: str | None = None) -> dict:

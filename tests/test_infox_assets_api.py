@@ -143,7 +143,8 @@ def test_audit_click_during_automatic_continuation_does_not_steal_cas(tmp_path):
         assert store.get(r.id).stage == 'draft_ready'
         release.set()
         await manager.wait(r.id)
-        assert store.get(r.id).stage == 'assets_audited'
+        assert store.get(r.id).stage == 'ready_for_editor'
+        assert store.get(r.id).asset_save.state == 'unchanged_verified'
         assert fake.calls == ['project', 'generation']
         await manager.close()
     asyncio.run(scenario())
@@ -163,7 +164,8 @@ def test_automatic_audit_has_its_own_read_lifetime_after_tracking_completes(tmp_
         manager = RunManager(store, lambda: fake, tracking_timeout=.04, retry_delay=.001)
         await manager.start(r.id)
         await manager.wait(r.id)
-        assert store.get(r.id).stage == 'assets_audited'
+        assert store.get(r.id).stage == 'ready_for_editor'
+        assert store.get(r.id).asset_save.state == 'unchanged_verified'
         assert not manager.active(r.id)
         await manager.close()
     asyncio.run(scenario())

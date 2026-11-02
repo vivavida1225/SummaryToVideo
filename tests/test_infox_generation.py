@@ -16,10 +16,12 @@ from backend.jobs import JobManager
 from backend.config import Settings
 
 
-def prepared(root):
+def prepared(root, *, auto_replace=True):
     seed(root)
     store = RunStore(root)
-    record, _ = RunService(JobManager(Settings(root)), store).prepare(JOB_ID, PrepareRunInput(**payload()))
+    data = payload()
+    data.setdefault('settings', {})['auto_replace'] = auto_replace
+    record, _ = RunService(JobManager(Settings(root)), store).prepare(JOB_ID, PrepareRunInput(**data))
     return store, record
 
 
@@ -156,7 +158,8 @@ def test_manager_one_shot_admission_early_event_reconnect_and_delayed_data(tmp_p
         await asyncio.gather(manager.start(record.id), manager.start(record.id))
         await manager.wait(record.id)
         final = store.get(record.id)
-        assert final.stage == 'assets_audited' and final.asset_audit.state == 'completed'
+        assert final.stage == 'ready_for_editor' and final.asset_audit.state == 'completed'
+        assert final.asset_save.state == 'unchanged_verified' and final.favorite_replacements == ()
         assert final.video_id == 'video-1' and final.task_id == 'task-1'
         assert final.tracking.completion_seen and final.tracking.draft.ready
         assert final.tracking.event_count == 1 and final.tracking.reconnects >= 1
@@ -222,9 +225,10 @@ def test_start_api_is_guarded_and_background_run_can_be_polled(tmp_path):
         assert c.post(url, headers=headers).status_code == 202
         for _ in range(100):
             result = c.get(f'/api/infox-runs/{r["id"]}', headers=headers).json()
-            if result['stage'] == 'assets_audited': break
+            if result['stage'] == 'ready_for_editor': break
             time.sleep(.01)
-        assert result['stage'] == 'assets_audited'
+        assert result['stage'] == 'ready_for_editor'
+        assert result['asset_save']['state'] == 'unchanged_verified'
         assert result['editor_url'].endswith('/video-1?chatboxView=script')
         assert fake.calls == ['project', 'generation']
 
@@ -245,7 +249,7 @@ def test_auth_failure_before_send_can_resume_same_snapshot(tmp_path):
         fake.authenticate = good_auth
         await manager.start(record.id)
         await manager.wait(record.id)
-        assert store.get(record.id).stage == 'assets_audited'
+        assert store.get(record.id).stage == 'ready_for_editor'
         await manager.close()
     asyncio.run(scenario())
 
@@ -305,7 +309,7 @@ def test_persisted_completion_recovers_read_only_and_auth_error_is_distinct(tmp_
         fake.video_state = good_read
         await manager.start(r.id)
         await manager.wait(r.id)
-        assert store.get(r.id).stage == 'assets_audited' and fake.calls == []
+        assert store.get(r.id).stage == 'ready_for_editor' and fake.calls == []
         await manager.close()
     asyncio.run(scenario())
 

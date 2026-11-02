@@ -261,6 +261,10 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
     async def plan_infox_replacements(run_id: str, data: InfoXAuditInput | None = None):
         return infox_view(await infox_manager.plan(run_id))
 
+    @app.post('/api/infox-runs/{run_id}/save-assets', status_code=202)
+    async def save_infox_replacements(run_id: str, data: InfoXAuditInput | None = None):
+        return infox_view(await infox_manager.save(run_id))
+
     @app.post('/api/jobs/{job_id}/retry', status_code=202)
     async def retry_job(job_id: str, data: ModelInput | None = None):
         find_job(job_id)

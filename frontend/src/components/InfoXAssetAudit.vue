@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import type { InfoXAssetAudit } from '../types'
 
-const props = defineProps<{ audit: InfoXAssetAudit }>()
+const props = defineProps<{ audit: InfoXAssetAudit; saveStarted?: boolean }>()
 const counts = computed(() => {
   const items = props.audit.items
   return ['detected', 'not_detected', 'unknown', 'favorite_exempt'].map(key => items.filter(item => item.verdict === key).length)
@@ -37,7 +37,9 @@ const labels: Record<string, string> = {
     <template v-else>
       <p>기업명 검출 {{ counts[0] }} · 메타데이터 미검출 {{ counts[1] }} · 확인 불가 {{ counts[2] }} · 즐겨찾기 예외 {{ counts[3] }}</p>
       <p v-if="audit.error_code">{{ labels[audit.error_code] ?? '검사 상태를 확인하세요.' }}</p>
-      <p>메타데이터 검사 결과입니다. 영상 속 기업명·로고의 시각적 노출 부재를 보증하지 않습니다. 교체·저장은 아직 수행하지 않았습니다.</p>
+      <p>메타데이터 검사 결과입니다. 영상 속 기업명·로고의 시각적 노출 부재를 보증하지 않습니다.</p>
+      <p v-if="saveStarted">교체 전 검사 기록입니다. 이후 저장·적용 결과는 아래 검증 상태에서 확인하세요.</p>
+      <p v-else>교체·저장은 아직 수행하지 않았습니다.</p>
       <ul v-if="audit.issues.length">
         <li v-for="(issue, index) in audit.issues" :key="index">
           <template v-if="issue.scene_index != null">장면 {{ issue.scene_index + 1 }} · </template>{{ labels[issue.code] ?? issue.code }}

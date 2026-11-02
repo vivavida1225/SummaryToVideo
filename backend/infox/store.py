@@ -14,9 +14,10 @@ from pydantic import ValidationError
 from .run_models import Receipt, RunError, RunRecord, Tracking, now
 from .asset_models import AssetAudit
 from .plan_models import PreservationChecks, ReplacementPlan, ReplacementChoice, SearchEvidence
+from .save_store import SaveStoreMixin
 
 
-class RunStore:
+class RunStore(SaveStoreMixin):
     def __init__(self, root: Path):
         self.root = root.resolve()
 
@@ -94,6 +95,8 @@ class RunStore:
 
     def begin_plan(self, run_id: str, *, expected_version: int) -> RunRecord:
         with self._edit(run_id, expected_version) as (record,data):
+            if record.asset_save.state != 'not_started':
+                raise RunError('save_in_progress')
             if (record.stage not in ('assets_audited','replacement_planned','selecting_favorites','needs_attention')
                     or record.asset_audit.state!='completed' or record.requires_reconciliation
                     or record.project.state!='accepted' or record.generation.state!='accepted'
@@ -136,6 +139,8 @@ class RunStore:
 
     def begin_audit(self, run_id: str, *, expected_version: int) -> RunRecord:
         with self._edit(run_id, expected_version) as (record, data):
+            if record.asset_save.state != 'not_started':
+                raise RunError('save_in_progress')
             if (record.stage not in ('draft_ready', 'auditing_assets', 'assets_audited', 'replacement_planned', 'needs_attention')
                     or record.requires_reconciliation or record.project.state != 'accepted'
                     or record.generation.state != 'accepted' or not record.video_id or not record.task_id
@@ -162,7 +167,7 @@ class RunStore:
         if stage not in ('prepared', 'project_created', 'generating', 'checking_draft', 'draft_ready', 'needs_attention', 'failed'):
             raise RunError('invalid_stage')
         with self._edit(run_id, expected_version) as (record, data):
-            if record.stage in ('draft_ready', 'auditing_assets', 'assets_audited', 'selecting_favorites', 'replacement_planned', 'ready_for_editor', 'failed'):
+            if record.asset_save.state != 'not_started' or record.stage in ('draft_ready', 'auditing_assets', 'assets_audited', 'selecting_favorites', 'replacement_planned', 'ready_for_editor', 'failed'):
                 raise RunError('invalid_stage')
             if stage == 'prepared' and (record.project.state != 'not_sent' or record.generation.state != 'not_sent'):
                 raise RunError('invalid_stage')

@@ -1,0 +1,46 @@
+{
+  "verified_at_kst": "2026-11-02T14:36:54.115393+09:00",
+  "existing_phase3_run_reused": true,
+  "stage": "ready_for_editor",
+  "save_state": "unchanged_verified",
+  "plan_state": "not_needed",
+  "production_detected_count": 0,
+  "production_selections": 0,
+  "auto_replace": false,
+  "context_mapping": {
+    "video": "videostate.video",
+    "contextData": "videostate.context",
+    "updatedAt": "videostate.updated_at"
+  },
+  "actual_context_is_object": true,
+  "actual_contextData_key_absent": true,
+  "mapping_preserves_full_context": true,
+  "mapping_preserves_exact_version": true,
+  "same_snapshot": true,
+  "same_video_and_task": true,
+  "same_receipts": true,
+  "server_version_unchanged": true,
+  "full_remote_state_unchanged_except_signed_urls": true,
+  "current_remote_matches_unchanged_verification": true,
+  "draft_still_ready": true,
+  "saved_favorite_history_unchanged": true,
+  "remote_video_writes": 0,
+  "synthetic_metadata_hit_added": false,
+  "actual_save_response_verified": false,
+  "actual_conflict_response_verified": false,
+  "actual_replacement_readback_verified": false,
+  "actual_replacement_editor_playback_verified": false,
+  "reason": "Existing authorized run has no replacement targets; no new validation project, generation, or synthetic production hit is permitted.",
+  "editor_source_contract": {
+    "load": "getVideoState -> SET_CONTEXT_DATA(payload: response.context)",
+    "save_hook": "videoState.context -> saveVideoAndContextData(videoId, video, contextData, updatedAt)",
+    "success": "spec HAR observations: HTTP 200, status Video updated, updated_at",
+    "conflict": "editor save coordinator handles HTTP 409; actual conflict body remains unverified"
+  },
+  "operations": [
+    "authentication",
+    "video_state",
+    "authentication",
+    "video_state"
+  ]
+}

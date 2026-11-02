@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from .asset_models import AssetAudit, FavoriteReplacement
 from .plan_models import ReplacementPlan
+from .save_models import AssetSave
 
 
 def now() -> str:
@@ -134,10 +135,13 @@ class RunRecord(StrictModel):
     asset_audit: AssetAudit = Field(default_factory=AssetAudit)
     favorite_replacements: tuple[FavoriteReplacement, ...] = ()
     replacement_plan: ReplacementPlan = Field(default_factory=ReplacementPlan)
+    asset_save: AssetSave = Field(default_factory=AssetSave)
 
     @property
     def requires_reconciliation(self) -> bool:
-        return any(r.state in ('intent_recorded', 'unknown') for r in (self.project, self.generation))
+        return (any(r.state in ('intent_recorded', 'unknown') for r in (self.project, self.generation))
+                or (self.asset_save.receipt_state in ('intent_recorded', 'unknown')
+                    and self.asset_save.state != 'saved_verified'))
 
 
 def text_hash(text: str) -> str:

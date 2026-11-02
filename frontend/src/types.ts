@@ -87,6 +87,7 @@ export interface InfoXRun {
   asset_audit?: InfoXAssetAudit
   asset_counts?: Record<string, number>
   replacement_plan?: InfoXReplacementPlan
+  asset_save?: InfoXAssetSave
   snapshot: {
     job_id: string
     revision: number
@@ -106,6 +107,14 @@ export interface InfoXRun {
     reconnects?: number
     draft?: { identity_matches: boolean; scenes_match: boolean; voices_ready: boolean; captions_ready: boolean }
   }
+}
+
+export interface InfoXAssetSave {
+  state: string
+  receipt_state: string
+  error_code?: string | null
+  response_version?: string | null
+  verified_version?: string | null
 }
 
 export interface InfoXReplacementPlan {
