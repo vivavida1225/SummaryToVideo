@@ -48,17 +48,23 @@ def _positive(value) -> bool:
 
 
 def verify_draft(record: RunRecord, state: dict) -> DraftCheck:
+    """Check production readiness without comparing generated text to input.
+
+    InfoX owns generated narration/caption spelling. The immutable snapshot is
+    still sent verbatim; source/result preservation during saving is separate.
+    """
     scenes = state.get('video', {}).get('scenes') if isinstance(state.get('video'), dict) else None
     matching = isinstance(scenes, list) and len(scenes) == len(record.snapshot.scenes)
     voices, captions = bool(matching), bool(matching)
     settings = record.snapshot.settings
     if matching:
-        for expected, scene in zip(record.snapshot.scenes, scenes):
+        for scene in scenes:
             voice = scene.get('voiceover') if isinstance(scene, dict) else None
             if not isinstance(voice, dict):
                 matching = voices = captions = False
                 continue
-            matching = matching and voice.get('content') == expected.text
+            content = voice.get('content')
+            matching = bool(matching and isinstance(content, str) and content.strip())
             voices = voices and all(isinstance(voice.get(k), str) and voice[k].strip() for k in ('filename', 'bucket'))
             voices = bool(voices and _positive(voice.get('audio_duration')) and
                 voice.get('voice_id') == settings.voice_id and voice.get('voice_provider') == settings.voice_provider
@@ -66,7 +72,7 @@ def verify_draft(record: RunRecord, state: dict) -> DraftCheck:
             segments = voice.get('segment_captions')
             valid = isinstance(segments, list) and bool(segments)
             previous_end = 0
-            text = ''
+            text_ready = False
             if valid:
                 for segment in segments:
                     if not isinstance(segment, dict):
@@ -79,7 +85,7 @@ def verify_draft(record: RunRecord, state: dict) -> DraftCheck:
                         valid = False
                         break
                     previous_end = end
-                    text += segment['text']
-            captions = bool(captions and valid and ''.join(text.split()) == ''.join(expected.text.split()))
+                    text_ready = text_ready or bool(segment['text'].strip())
+            captions = bool(captions and valid and text_ready)
     return DraftCheck(identity_matches=bool(record.video_id and str(state.get('id')) == record.video_id),
                       scenes_match=bool(matching), voices_ready=bool(voices), captions_ready=bool(captions))

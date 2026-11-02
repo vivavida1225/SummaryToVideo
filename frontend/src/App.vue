@@ -87,7 +87,7 @@ const infoxErrorLabels: Record<string, string> = {
   project_acceptance_unverifiable: '프로젝트 접수 여부를 확정하지 못했습니다. 새 프로젝트를 자동 생성하지 않습니다.',
   generation_acceptance_unverifiable: '제작 시작 접수 여부를 확정하지 못했습니다. 기존 영상·작업부터 확인해야 합니다.',
   completion_unconfirmed: '현재 작업의 실제 완료 신호를 확인하지 못했습니다.',
-  draft_not_ready: '완료 신호 뒤 대본·장면·음성·자막 준비 상태가 아직 일치하지 않습니다.',
+  draft_not_ready: '완료 신호 뒤 장면·음성·자막의 필수 데이터와 음성 설정을 확인하지 못했습니다.',
   remote_task_failed: '현재 작업의 실패 이벤트를 확인했습니다.',
   connection_interrupted: '이벤트 연결이 중단되어 같은 영상·작업을 다시 확인하고 있습니다.',
   internal_error: '추적을 계속하지 못했습니다. 보관된 실행 상태를 다시 확인하세요.',

@@ -9,7 +9,7 @@ const verified = computed(() => ['scope_preserved', 'normal_assets_preserved', '
 const errors: Record<string, string> = {
   audit_required: '기업 에셋 검사를 완료한 뒤 계획을 만들 수 있습니다.',
   source_changed: '서버 버전 또는 배정 에셋이 달라졌습니다. 다시 검사한 뒤 기존 선택을 확인하세요.',
-  draft_changed: '서버 대본·음성·자막이 확정 전송본과 달라 계획을 보류했습니다.',
+  draft_changed: '서버 영상의 장면·음성·자막 준비 조건을 확인하지 못해 계획을 보류했습니다.',
   candidates_empty: '반도체 즐겨찾기 검색 결과가 없습니다.',
   no_usable_candidate: '기술적으로 사용할 수 있는 즐겨찾기 구간을 찾지 못했습니다.',
   pagination_invalid: '검색 페이지가 일관되지 않아 전체 결과를 확인하지 못했습니다.',

@@ -171,7 +171,7 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
             'job_not_ready': '대본 생성이 끝난 뒤 전송본을 확정하세요.',
             'run_not_found': 'InfoX 실행 기록을 찾을 수 없습니다.',
             'storage_error': 'InfoX 실행 기록을 읽거나 저장하지 못했습니다. 같은 요청으로 다시 확인하세요.',
-            'draft_not_ready': '현재 작업의 완료 신호와 대본·음성·자막 준비를 확인한 뒤 에셋을 검사할 수 있습니다.',
+            'draft_not_ready': '현재 작업의 완료 신호와 장면·음성·자막의 필수 데이터를 확인한 뒤 에셋을 검사할 수 있습니다.',
             'audit_required': '현재 영상의 기업 에셋 검사를 완료한 뒤 교체 계획을 만들 수 있습니다.',
         }
         return JSONResponse({'detail': messages.get(exc.code, 'InfoX 실행 기록과 설정을 확인하세요.'),

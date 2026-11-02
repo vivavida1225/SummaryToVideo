@@ -56,22 +56,82 @@ def test_write_methods_never_retry_even_get_or_401():
         asyncio.run(scenario(status))
 
 
-def test_draft_checks_exact_scenes_voice_and_timed_caption_text(tmp_path):
+def test_draft_checks_required_scenes_audio_and_timed_captions(tmp_path):
     from backend.infox.tracking import verify_draft
     _, r = prepared(tmp_path)
     r = r.model_copy(update={'video_id': 'video-1'})
     state = draft(r)
     assert verify_draft(r, state).ready
-    for mutation in ('text', 'count', 'voice', 'caption', 'duration', 'id'):
+    for mutation in ('count', 'voice', 'duration', 'id'):
         bad = copy.deepcopy(state)
         v = bad['video']['scenes'][0]['voiceover']
-        if mutation == 'text': v['content'] = '다른 대본'
         if mutation == 'count': bad['video']['scenes'].pop()
         if mutation == 'voice': v['filename'] = ''
-        if mutation == 'caption': v['segment_captions'][0]['text'] = '다른 자막'
         if mutation == 'duration': v['audio_duration'] = 0
         if mutation == 'id': bad['id'] = 'other'
         assert not verify_draft(r, bad).ready, mutation
+
+
+@pytest.mark.parametrize('generated,caption', [
+    ('삼성, SK하이닉스는 이점이사퍼센트 상승했습니다.', '삼성, SK하이닉스는 2.24% 상승했습니다.'),
+    ('InfoX가 반환한 다른 대본', 'InfoX가 반환한 다른 자막'),
+])
+def test_draft_does_not_compare_generated_narration_or_captions_with_snapshot(tmp_path, generated, caption):
+    from backend.infox.tracking import verify_draft
+    from backend.infox.service import creation_body
+    _, r = prepared(tmp_path)
+    r = r.model_copy(update={'video_id': 'video-1'})
+    original = r.snapshot.model_dump_json()
+    body = creation_body(r.snapshot)
+    value = draft(r)
+    for scene in value['video']['scenes']:
+        scene['voiceover']['content'] = generated
+        scene['voiceover']['segment_captions'][0]['text'] = caption
+    assert verify_draft(r, value).ready
+    assert r.snapshot.model_dump_json() == original
+    assert creation_body(r.snapshot) == body
+
+
+@pytest.mark.parametrize('mutation', [
+    'missing_content', 'empty_content', 'non_string_content', 'missing_caption', 'empty_caption',
+    'non_string_caption', 'empty_segments', 'overlap', 'reversed_time', 'non_numeric_time',
+    'wrong_voice_id', 'wrong_provider', 'wrong_speed', 'missing_bucket', 'zero_duration', 'missing_voiceover',
+])
+def test_relaxed_text_policy_still_rejects_missing_or_invalid_production_data(tmp_path, mutation):
+    from backend.infox.tracking import verify_draft
+    _, r = prepared(tmp_path)
+    r = r.model_copy(update={'video_id': 'video-1'})
+    value = draft(r)
+    v = value['video']['scenes'][0]['voiceover']
+    s = v['segment_captions'][0]
+    if mutation == 'missing_content': v.pop('content')
+    if mutation == 'empty_content': v['content'] = ' \n '
+    if mutation == 'non_string_content': v['content'] = 1
+    if mutation == 'missing_caption': s.pop('text')
+    if mutation == 'empty_caption': s['text'] = ' \n '
+    if mutation == 'non_string_caption': s['text'] = 1
+    if mutation == 'empty_segments': v['segment_captions'] = []
+    if mutation == 'overlap': v['segment_captions'].append({'text':'다음', 'startMs':1000, 'endMs':2500})
+    if mutation == 'reversed_time': s['endMs'] = 0
+    if mutation == 'non_numeric_time': s['startMs'] = '0'
+    if mutation == 'wrong_voice_id': v['voice_id'] = 'other'
+    if mutation == 'wrong_provider': v['voice_provider'] = 'other'
+    if mutation == 'wrong_speed': v['voice_speed'] = '2.0'
+    if mutation == 'missing_bucket': v.pop('bucket')
+    if mutation == 'zero_duration': v['audio_duration'] = 0
+    if mutation == 'missing_voiceover': value['video']['scenes'][0].pop('voiceover')
+    assert not verify_draft(r, value).ready
+
+
+def test_timed_empty_caption_placeholder_does_not_block_other_ready_captions(tmp_path):
+    from backend.infox.tracking import verify_draft
+    _, r = prepared(tmp_path)
+    r = r.model_copy(update={'video_id': 'video-1'})
+    value = draft(r)
+    voice = value['video']['scenes'][0]['voiceover']
+    voice['segment_captions'] = [{'text':'', 'startMs':0, 'endMs':1000},
+        {'text':r.snapshot.scenes[0].text, 'startMs':1000, 'endMs':2000}]
+    assert verify_draft(r, value).ready
 
 
 def test_event_matching_rejects_false_completion_and_foreign_task(tmp_path):

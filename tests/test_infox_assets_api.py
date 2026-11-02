@@ -96,7 +96,7 @@ def test_unready_runs_cannot_audit_and_changed_draft_is_not_inspected(tmp_path):
             await manager.audit(unready.id)
         store, r = ready_run(tmp_path)
         value = asset_state(r)
-        value['video']['scenes'][0]['voiceover']['content'] = '다른 대본'
+        value['video']['scenes'][0]['voiceover']['filename'] = ''
         fake = ReadOnlyClient(value)
         manager = RunManager(store, lambda: fake)
         await manager.audit(r.id)

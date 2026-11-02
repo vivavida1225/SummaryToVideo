@@ -1,0 +1,26 @@
+{
+  "checked_at_kst": "2026-11-02T16:17:40.818685+09:00",
+  "existing_latest_run_read_only": true,
+  "persisted_stage": "needs_attention",
+  "persisted_error": "draft_not_ready",
+  "previous_readiness": {
+    "identity_matches": true,
+    "scenes_match": false,
+    "voices_ready": true,
+    "captions_ready": false
+  },
+  "current_readiness": {
+    "identity_matches": true,
+    "scenes_match": true,
+    "voices_ready": true,
+    "captions_ready": true
+  },
+  "current_ready": true,
+  "expected_scenes": 5,
+  "actual_scenes": 5,
+  "server_input_matches_snapshot": true,
+  "record_unchanged": true,
+  "remote_video_writes": 0,
+  "automatic_run_resumed": false,
+  "actual_replacement_save_verified": false
+}

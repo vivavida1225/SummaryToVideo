@@ -96,6 +96,7 @@ RunStage = Literal['prepared', 'creating_project', 'project_created', 'starting_
 
 class DraftCheck(StrictModel):
     identity_matches: bool = False
+    # Legacy API name: scene count/required structure, not text equivalence.
     scenes_match: bool = False
     voices_ready: bool = False
     captions_ready: bool = False

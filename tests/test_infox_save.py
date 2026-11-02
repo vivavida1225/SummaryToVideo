@@ -78,6 +78,36 @@ class SavingClient(PlanningClient):
         return self.value['updated_at']
 
 
+@pytest.mark.parametrize('tamper', [None, 'content', 'caption'])
+def test_generated_text_variations_can_be_saved_but_save_must_preserve_server_text(tmp_path, tamper):
+    async def scenario():
+        store, r, value = audited_run(tmp_path)
+        value['context'] = {'data': {'inputText': r.snapshot.text}}
+        for scene in value['video']['scenes']:
+            scene['voiceover']['content'] = '삼성, SK하이닉스는 이점이사퍼센트 상승했습니다.'
+            scene['voiceover']['segment_captions'][0]['text'] = '삼성, SK하이닉스는 2.24% 상승했습니다.'
+        fake = SavingClient(store, r, value)
+        r = await prepare_plan(store, fake, r)
+        assert r.replacement_plan.state == 'ready'
+        original_save = fake.save_video_context
+        async def save(*args):
+            version = await original_save(*args)
+            voice = fake.value['video']['scenes'][0]['voiceover']
+            if tamper == 'content': voice['content'] = '저장 중 바뀐 대본'
+            if tamper == 'caption': voice['segment_captions'][0]['text'] = '저장 중 바뀐 자막'
+            return version
+        fake.save_video_context = save
+        manager = RunManager(store, lambda: fake)
+        await manager.save(r.id); await manager.wait(r.id)
+        final = store.get(r.id)
+        assert final.asset_save.state == ('saved_verified' if tamper is None else 'needs_attention')
+        if tamper: assert final.asset_save.error_code == 'verification_failed'
+        assert bool(final.favorite_replacements) == (tamper is None)
+        assert final.snapshot == r.snapshot and len(fake.writes) == 1
+        await manager.close()
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize('status', [200, 201, 401, 409, 429, 500])
 def test_save_client_is_one_shot_and_validates_status_version(status):
     async def scenario():

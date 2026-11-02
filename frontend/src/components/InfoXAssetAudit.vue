@@ -17,7 +17,7 @@ const labels: Record<string, string> = {
   verified_favorite_replacement: '검증된 즐겨찾기 교체 이력과 일치합니다.',
   authentication_required: 'InfoX 백엔드 인증을 확인한 뒤 다시 검사하세요.',
   read_failed: '현재 영상 데이터를 읽거나 검사하지 못했습니다. 다시 검사할 수 있습니다.',
-  draft_changed: '서버 대본·음성·자막이 확정 전송본과 달라 에셋 검사를 보류했습니다.',
+  draft_changed: '서버 영상의 장면·음성·자막 준비 조건을 확인하지 못해 에셋 검사를 보류했습니다.',
   inspection_incomplete: '확인 불가 항목이나 검사하지 못한 구조가 있습니다.',
   unsupported_template: '이 템플릿의 자동 배정 구조는 아직 검증되지 않았습니다.',
   invalid_video: '조회한 영상이 현재 실행과 다릅니다.', invalid_scenes: '장면 구조를 읽지 못했습니다.',

@@ -11,7 +11,7 @@ const labels: Record<string, string> = {
 }
 const errors: Record<string, string> = {
   source_changed: '서버 버전이나 배치가 계획 이후 달라졌습니다. 기존 데이터는 덮어쓰지 않았습니다.',
-  draft_changed: '대본·음성·자막이 확정본과 달라 저장을 보류했습니다.',
+  draft_changed: '서버 영상의 장면·음성·자막 준비 조건을 확인하지 못해 저장을 보류했습니다.',
   selection_unavailable: '고정한 즐겨찾기 구간을 확인하지 못했습니다. 다른 후보로 변경하지 않습니다.',
   context_invalid: '서버 편집 컨텍스트 또는 저장 버전을 확인하지 못했습니다.',
   transform_invalid: '재구성한 제안본의 참조·보존 검증이 실패했습니다.',

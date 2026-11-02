@@ -93,7 +93,14 @@ def main():
                 # backend manager owns admission and tracking independently of UI.
                 run_manager = app.state.infox_manager
                 fake = FakeClient(run_manager.store, run_manager.store.get(record['id']))
-                original_read = fake.video_state
+                generated_read = fake.video_state
+                async def original_read(video_id):
+                    value = await generated_read(video_id)
+                    # The service may return different narration/caption spelling.
+                    # Production readiness trusts these texts; snapshots remain fixed.
+                    value['video']['scenes'][0]['voiceover']['content'] = 'InfoX가 반환한 장면 대본'
+                    value['video']['scenes'][0]['voiceover']['segment_captions'][0]['text'] = 'InfoX가 반환한 표시 자막'
+                    return value
                 async def incomplete_assets(video_id):
                     value = await original_read(video_id)
                     # Leave metadata incomplete, so automation correctly stops
@@ -111,6 +118,7 @@ def main():
                 link = page.get_by_role('link', name='InfoX 편집 화면 수동 열기')
                 expect(link).to_have_attribute('href', 'https://infox2.infomaxai.com/studio/library/videos/video-1?chatboxView=script')
                 assert fake.calls == ['project', 'generation']
+                assert run_manager.store.get(record['id']).tracking.draft.ready
                 assert run_manager.store.get(record['id']).snapshot.text == edited
                 page.reload(wait_until='networkidle')
                 expect(page.get_by_text('확인이 필요합니다. 기존 실행 상태를 확인하세요.', exact=True)).to_be_visible()
