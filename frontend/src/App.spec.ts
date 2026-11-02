@@ -81,6 +81,106 @@ async function finishBootstrap() {
 }
 
 describe('App', () => {
+  function titleForm(run: ReturnType<typeof makeInfoxRun> | null = null,
+    onPrepare?: (body: Record<string, unknown>) => Response) {
+    sessionStorage.setItem('market-compressor.job-id', 'job-1')
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-01T16:00:00Z'))
+    return installBootstrapFetch((path, init) => {
+      if (path.endsWith('/editor-attempts')) return jsonResponse({ attempt:null })
+      if (path.endsWith('/infox-runs')) {
+        if (init.method === 'POST' && onPrepare) return onPrepare(JSON.parse(String(init.body)))
+        return jsonResponse({ run })
+      }
+      if (path === '/api/jobs/job-1') return jsonResponse(makeJob({ state:'completed', compressed:'원본', revision:0 }))
+      throw new Error(`unexpected ${path}`)
+    })
+  }
+
+  it('오늘 날짜 기본 제목을 채우고 개별 수정 제목으로 전송본을 확정한다', async () => {
+    let prepared: Record<string, unknown> | undefined
+    titleForm(null, body => {
+      prepared = body
+      const run = makeInfoxRun()
+      run.snapshot.settings.title = (body.settings as {title:string}).title
+      return jsonResponse(run)
+    })
+    render(App)
+    const title = await screen.findByRole('textbox', { name:'InfoX 영상 제목' })
+    await waitFor(() => expect(title).toBeEnabled())
+    expect(title).toHaveValue('1102_시황영상')
+    await fireEvent.update(title, '이번 영상만 다른 제목')
+    await fireEvent.click(screen.getByRole('button', { name:'InfoX 전송본 확정' }))
+    await waitFor(() => expect(prepared?.settings).toMatchObject({ title:'이번 영상만 다른 제목' }))
+    expect(localStorage.getItem('market-compressor.infox-title-template')).toBe(null)
+  })
+
+  it('UI에서 기본 형식을 저장하고 다음 날 복원하면 날짜를 새로 채운다', async () => {
+    titleForm()
+    const view = render(App)
+    const title = await screen.findByRole('textbox', { name:'InfoX 영상 제목' })
+    await waitFor(() => expect(title).toBeEnabled())
+    await fireEvent.click(screen.getByText('기본 제목 설정', { exact:true }))
+    await fireEvent.update(screen.getByRole('textbox', { name:'기본 제목 형식' }), 'MMDD_장마감')
+    await fireEvent.click(screen.getByRole('button', { name:'기본값 저장 및 현재 제목에 적용' }))
+    expect(localStorage.getItem('market-compressor.infox-title-template')).toBe('MMDD_장마감')
+    expect(title).toHaveValue('1102_장마감')
+    view.unmount()
+    vi.setSystemTime(new Date('2026-11-02T16:00:00Z'))
+    render(App)
+    const restored = await screen.findByRole('textbox', { name:'InfoX 영상 제목' })
+    await waitFor(() => expect(restored).toBeEnabled())
+    expect(restored).toHaveValue('1103_장마감')
+  })
+
+  it('저장된 기본 형식이 있어도 기존 확정 제목을 복원하고 기본값 저장만으로 재확정하지 않는다', async () => {
+    localStorage.setItem('market-compressor.infox-title-template', 'MMDD_장마감')
+    const run = makeInfoxRun()
+    run.snapshot.settings.title = '이전에 확정한 제목'
+    const requests = titleForm(run)
+    render(App)
+    const title = await screen.findByRole('textbox', { name:'InfoX 영상 제목' })
+    await waitFor(() => expect(title).toHaveValue('이전에 확정한 제목'))
+    await fireEvent.click(screen.getByText('기본 제목 설정', { exact:true }))
+    expect(screen.getByRole('textbox', { name:'기본 제목 형식' })).toHaveValue('MMDD_장마감')
+    await fireEvent.update(screen.getByRole('textbox', { name:'기본 제목 형식' }), 'MMDD_오전시황')
+    await fireEvent.click(screen.getByRole('button', { name:'기본값 저장 및 현재 제목에 적용' }))
+    expect(title).toHaveValue('1102_오전시황')
+    expect(screen.getByText(/확정 대본 버전 0 · 1장면 · 이전에 확정한 제목/)).toBeVisible()
+    expect(requests.mock.calls.filter(([, init]) => init?.method === 'POST')).toHaveLength(0)
+  })
+
+  it('응답 유실 요청을 복원할 때 저장된 기본값보다 원래 요청 제목을 우선한다', async () => {
+    localStorage.setItem('market-compressor.infox-title-template', 'MMDD_장마감')
+    let prepared: Record<string, unknown> | undefined
+    titleForm(null, body => { prepared = body; return jsonResponse(makeInfoxRun()) })
+    sessionStorage.setItem('market-compressor.infox-pending.job-1', JSON.stringify({
+      intent_id:'11111111-1111-4111-8111-111111111111', revision:3,
+      settings:{ title:'유실 요청의 원래 제목', auto_replace:true }, review_confirmed:false, new_run:false,
+    }))
+    render(App)
+    const button = await screen.findByRole('button', { name:'확정 결과 다시 확인' })
+    await waitFor(() => expect(button).toBeEnabled())
+    expect(screen.getByRole('textbox', { name:'InfoX 영상 제목' })).toHaveValue('유실 요청의 원래 제목')
+    await fireEvent.click(screen.getByText('기본 제목 설정', { exact:true }))
+    expect(screen.getByRole('button', { name:'기본값 저장 및 현재 제목에 적용' })).toBeDisabled()
+    await fireEvent.click(button)
+    await waitFor(() => expect(prepared?.settings).toMatchObject({ title:'유실 요청의 원래 제목' }))
+  })
+
+  it('기본값 저장이 차단되면 실패를 알리고 현재 제목을 덮지 않는다', async () => {
+    titleForm()
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new DOMException('blocked', 'SecurityError') })
+    render(App)
+    const title = await screen.findByRole('textbox', { name:'InfoX 영상 제목' })
+    await waitFor(() => expect(title).toBeEnabled())
+    await fireEvent.click(screen.getByText('기본 제목 설정', { exact:true }))
+    await fireEvent.update(screen.getByRole('textbox', { name:'기본 제목 형식' }), 'MMDD_장마감')
+    await fireEvent.click(screen.getByRole('button', { name:'기본값 저장 및 현재 제목에 적용' }))
+    expect(screen.getByText('기본 제목을 저장하지 못했습니다. 브라우저 저장소를 확인하세요.')).toBeVisible()
+    expect(title).toHaveValue('1102_시황영상')
+  })
+
   it('저장 요청 응답 유실은 GET으로 확인하고 저장 완료·재생 미확인을 표시한다', async () => {
     sessionStorage.setItem('market-compressor.job-id', 'job-1')
     const run = { ...makeInfoxRun(), stage: 'replacement_planned', replacement_plan: { state: 'ready', selections: [] },
@@ -567,6 +667,7 @@ describe('App', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
   })

@@ -8,11 +8,13 @@ import InfoXAssetAudit from './components/InfoXAssetAudit.vue'
 import InfoXAssetSave from './components/InfoXAssetSave.vue'
 import InfoXReplacementPlan from './components/InfoXReplacementPlan.vue'
 import { EditorNavigation, editorEligible, editorUrl } from './infoxEditor'
+import { DEFAULT_INFOX_TITLE_TEMPLATE, formatInfoxTitle, validInfoxTitleTemplate } from './infoxTitle'
 import type { InfoXPrepareInput, InfoXRun, Job, SessionInfo, SourceFile } from './types'
 
 const JOB_STORAGE_KEY = 'market-compressor.job-id'
 const MODEL_STORAGE_KEY = 'market-compressor.model'
 const TRANSCRIBE_NUMBERS_STORAGE_KEY = 'market-compressor.transcribe-numbers'
+const INFOX_TITLE_TEMPLATE_STORAGE_KEY = 'market-compressor.infox-title-template'
 const TERMINAL_STATES = new Set(['completed', 'failed', 'needs_review'])
 
 const session = ref<SessionInfo | null>(null)
@@ -94,7 +96,14 @@ const infoxErrorLabels: Record<string, string> = {
 }
 const infoxError = ref('')
 const infoxReviewConfirmed = ref(false)
-const infoxTitle = ref('시황 영상')
+const storedInfoxTitleTemplate = readStored('localStorage', INFOX_TITLE_TEMPLATE_STORAGE_KEY)
+const infoxTitleTemplate = ref(storedInfoxTitleTemplate && validInfoxTitleTemplate(storedInfoxTitleTemplate)
+  ? storedInfoxTitleTemplate : DEFAULT_INFOX_TITLE_TEMPLATE)
+const infoxTitleTemplateDraft = ref(infoxTitleTemplate.value)
+const infoxTitleTemplateError = ref('')
+const infoxTitleTemplateSaved = ref(false)
+const infoxTitleTemplateValid = computed(() => validInfoxTitleTemplate(infoxTitleTemplateDraft.value))
+const infoxTitle = ref(formatInfoxTitle(infoxTitleTemplate.value))
 const infoxAutoReplace = ref(true)
 const infoxPending = ref<InfoXPrepareInput | null>(null)
 const infoxNeedsReview = computed(() => job.value?.state !== 'completed' || !!job.value?.validation_issues?.length)
@@ -147,6 +156,26 @@ function writeStored(storage: 'localStorage' | 'sessionStorage', key: string, va
     else window[storage].setItem(key, value)
   } catch { /* Storage can be blocked; keep this page usable. */ }
 }
+
+function saveInfoxTitleTemplate() {
+  if (!infoxTitleTemplateValid.value || inputBusy.value || infoxLoading.value || infoxPending.value) return
+  infoxTitleTemplateError.value = ''
+  infoxTitleTemplateSaved.value = false
+  try {
+    window.localStorage.setItem(INFOX_TITLE_TEMPLATE_STORAGE_KEY, infoxTitleTemplateDraft.value)
+  } catch {
+    infoxTitleTemplateError.value = '기본 제목을 저장하지 못했습니다. 브라우저 저장소를 확인하세요.'
+    return
+  }
+  infoxTitleTemplate.value = infoxTitleTemplateDraft.value
+  infoxTitle.value = formatInfoxTitle(infoxTitleTemplate.value)
+  infoxTitleTemplateSaved.value = true
+}
+
+watch(infoxTitleTemplateDraft, () => {
+  infoxTitleTemplateError.value = ''
+  infoxTitleTemplateSaved.value = false
+})
 
 function rememberModel() {
   writeStored('localStorage', MODEL_STORAGE_KEY, selectedModel.value)
@@ -286,7 +315,7 @@ watch(() => job.value?.id, async id => {
   infoxError.value = ''
   infoxReviewConfirmed.value = false
   infoxPending.value = null
-  infoxTitle.value = '시황 영상'
+  infoxTitle.value = formatInfoxTitle(infoxTitleTemplate.value)
   infoxAutoReplace.value = true
   if (!id) return
   try {
@@ -889,6 +918,19 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
           </div>
           <label for="infox-title">InfoX 영상 제목</label>
           <input id="infox-title" v-model="infoxTitle" type="text" maxlength="200" :disabled="inputBusy || infoxLoading || !!infoxPending" />
+          <details class="infox-title-settings">
+            <summary>기본 제목 설정</summary>
+            <div class="infox-title-settings-fields">
+              <label for="infox-title-template">기본 제목 형식</label>
+              <input id="infox-title-template" v-model="infoxTitleTemplateDraft" type="text" maxlength="200" aria-describedby="infox-title-template-help" :disabled="inputBusy || infoxLoading || !!infoxPending" />
+              <p id="infox-title-template-help">MMDD는 한국 시간의 오늘 월일로 바뀝니다. 기본 형식은 이 브라우저에 저장됩니다.</p>
+              <p v-if="infoxTitleTemplateValid">미리보기: {{ formatInfoxTitle(infoxTitleTemplateDraft) }}</p>
+              <p v-else>비어 있지 않은 200자 이하의 제목 형식을 입력하세요.</p>
+              <button type="button" class="ghost-button" :disabled="!infoxTitleTemplateValid || inputBusy || infoxLoading || !!infoxPending" @click="saveInfoxTitleTemplate">기본값 저장 및 현재 제목에 적용</button>
+              <p v-if="infoxTitleTemplateError" class="inline-error" role="alert">{{ infoxTitleTemplateError }}</p>
+              <p v-if="infoxTitleTemplateSaved" role="status">기본 제목을 저장하고 현재 제목에 적용했습니다.</p>
+            </div>
+          </details>
           <p>템플릿 1786 · 남/아나운서/당당 · 속도 1.0 · 목표 60초</p>
           <label class="transcribe-toggle">
             <input v-model="infoxAutoReplace" type="checkbox" :disabled="inputBusy || infoxLoading || !!infoxPending" />

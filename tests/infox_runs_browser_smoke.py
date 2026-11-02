@@ -7,6 +7,7 @@ import socket
 import tempfile
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import uvicorn
@@ -60,6 +61,18 @@ def main():
                 page.goto(url, wait_until='networkidle')
                 editor = page.get_by_role('textbox', name='압축 결과', exact=True)
                 expect(editor).to_be_editable()
+                day = datetime.now(timezone(timedelta(hours=9))).strftime('%m%d')
+                title = page.get_by_role('textbox', name='InfoX 영상 제목', exact=True)
+                expect(title).to_have_value(f'{day}_시황영상')
+                page.get_by_text('기본 제목 설정', exact=True).click()
+                template = page.get_by_role('textbox', name='기본 제목 형식', exact=True)
+                expect(template).to_have_value('MMDD_시황영상')
+                template.fill('MMDD_검증시황')
+                page.get_by_role('button', name='기본값 저장 및 현재 제목에 적용', exact=True).click()
+                expect(title).to_have_value(f'{day}_검증시황')
+                page.reload(wait_until='networkidle')
+                expect(title).to_have_value(f'{day}_검증시황')
+                title.fill('이 영상만 사용하는 제목')
                 edited = '  최종 편집 😀 대본  \n\n둘째 장면'
                 editor.fill(edited)
                 confirm = page.get_by_role('checkbox', name='검토 사유를 확인하고 이 대본을 사용합니다')
@@ -72,6 +85,7 @@ def main():
                 assert prepared.value.status == 201
                 record = prepared.value.json()
                 assert record['snapshot']['text'] == edited
+                assert record['snapshot']['settings']['title'] == '이 영상만 사용하는 제목'
                 assert record['snapshot']['revision'] == manager.get(job_id)['revision']
                 assert len(record['snapshot']['scenes']) == 2
                 assert record['project']['state'] == 'not_sent'
@@ -86,6 +100,16 @@ def main():
                 page.reload(wait_until='networkidle')
                 expect(page.get_by_text('전송본이 확정되었습니다.', exact=True)).to_be_visible()
                 assert app.state.infox_runs.get(record['id']).snapshot.text == edited
+                page.get_by_text('기본 제목 설정', exact=True).click()
+                template.fill('MMDD_다음영상')
+                page.get_by_role('button', name='기본값 저장 및 현재 제목에 적용', exact=True).click()
+                expect(title).to_have_value(f'{day}_다음영상')
+                assert app.state.infox_runs.get(record['id']).snapshot.settings.title == '이 영상만 사용하는 제목'
+                page.reload(wait_until='networkidle')
+                expect(title).to_have_value('이 영상만 사용하는 제목')
+                page.get_by_text('기본 제목 설정', exact=True).click()
+                expect(template).to_have_value('MMDD_다음영상')
+                page.get_by_text('기본 제목 설정', exact=True).click()
                 editor.fill('새로운 수정본')
                 expect(page.get_by_text('현재 편집본 또는 설정이 확정본과 다릅니다.', exact=True)).to_be_visible()
                 assert app.state.infox_runs.get(record['id']).snapshot.text == edited
@@ -189,15 +213,17 @@ def main():
                 assert len(saves) == 1 and fake.calls == ['project','generation']
                 expect(page.get_by_text('교체 계획 검증 완료 · 서버에는 저장하지 않았습니다.', exact=True)).not_to_be_visible()
                 # Verify layout and capture only synthetic test data.
-                for width in (390, 1440):
+                for width in (320, 390, 1440):
                     page.set_viewport_size({'width': width, 'height': 1000})
+                    page.get_by_text('기본 제목 설정', exact=True).click()
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                     page.get_by_role('heading', name='영상 전송본 준비').scroll_into_view_if_needed()
-                    page.screenshot(path=str(root / f'.runtime/infox-phase6-{width}.png'), full_page=True)
+                    page.screenshot(path=str(root / f'.runtime/infox-title-{width}.png'), full_page=True)
+                    page.get_by_text('기본 제목 설정', exact=True).click()
                 assert not errors, errors
                 assert not external_requests, 'Unexpected external browser requests'
                 browser.close()
-            print('PASS: snapshot/review, one-shot generation, audit/reinspection, fixed favorite mixed plan, controlled save/read/verify, persisted history after reload, responsive layout, no external requests or navigation')
+            print('PASS: dated/editable/persisted title defaults, independent title and frozen snapshot restore; review, one-shot generation, audit, mixed plan/save/readback, history restore; 320/390/1440px; no external requests or navigation')
         finally:
             server.should_exit = True
             thread.join(timeout=10)
