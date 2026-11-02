@@ -157,7 +157,7 @@ def _target_node(state, target):
 
 
 def make_choices(state, audit, candidate):
-    if audit.state!='completed' or audit.issues or any(x.verdict=='unknown' for x in audit.items):
+    if audit.state!='completed' or audit.blocking_issues:
         raise PlanError('audit_required')
     result=[]
     for target in audit.items:

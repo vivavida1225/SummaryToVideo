@@ -13,12 +13,12 @@ const labels: Record<string, string> = {
   metadata_missing: '해당 파일의 검사할 메타데이터가 없습니다.',
   reference_incomplete: '배정 파일·구간을 정확히 식별하지 못했습니다.',
   ambiguous_media: '영상과 사진 참조가 함께 있어 실제 배정 대상을 확정하지 못했습니다.',
-  metadata_unreadable: '일부 메타데이터의 구조를 읽지 못해 검사를 완료하지 못했습니다.',
+  metadata_unreadable: '일부 메타데이터의 내용을 읽지 못했습니다.',
   verified_favorite_replacement: '검증된 즐겨찾기 교체 이력과 일치합니다.',
   authentication_required: 'InfoX 백엔드 인증을 확인한 뒤 다시 검사하세요.',
   read_failed: '현재 영상 데이터를 읽거나 검사하지 못했습니다. 다시 검사할 수 있습니다.',
   draft_changed: '서버 영상의 장면·음성·자막 준비 조건을 확인하지 못해 에셋 검사를 보류했습니다.',
-  inspection_incomplete: '확인 불가 항목이나 검사하지 못한 구조가 있습니다.',
+  inspection_incomplete: '배정 구조나 필수 정보를 확인하지 못했습니다.',
   unsupported_template: '이 템플릿의 자동 배정 구조는 아직 검증되지 않았습니다.',
   invalid_video: '조회한 영상이 현재 실행과 다릅니다.', invalid_scenes: '장면 구조를 읽지 못했습니다.',
   scene_id_missing: '장면 식별자가 없습니다.', invalid_graph: '레이어 연결 구조를 읽지 못했습니다.',
@@ -36,6 +36,7 @@ const labels: Record<string, string> = {
     <p v-if="audit.state === 'running'">배정 에셋을 검사하는 중…</p>
     <template v-else>
       <p>기업명 검출 {{ counts[0] }} · 메타데이터 미검출 {{ counts[1] }} · 확인 불가 {{ counts[2] }} · 즐겨찾기 예외 {{ counts[3] }}</p>
+      <p v-if="counts[2]">확인 불가 항목은 미검출처럼 교체 대상에서 제외하며, 다음 단계 진행을 막지 않습니다.</p>
       <p v-if="audit.error_code">{{ labels[audit.error_code] ?? '검사 상태를 확인하세요.' }}</p>
       <p>메타데이터 검사 결과입니다. 영상 속 기업명·로고의 시각적 노출 부재를 보증하지 않습니다.</p>
       <p v-if="saveStarted">교체 전 검사 기록입니다. 이후 저장·적용 결과는 아래 검증 상태에서 확인하세요.</p>

@@ -135,7 +135,7 @@ async def save_plan(store, client, r):
             raise PlanError('draft_changed')
         fresh = audit_assets(state, template_id=r.snapshot.settings.template_id, run_id=r.id, video_id=r.video_id,
                              verified_replacements=r.favorite_replacements, policy=r.asset_audit.policy)
-        if fresh.state != 'completed' or fresh.items != r.asset_audit.items or fresh.issues:
+        if fresh.state != 'completed' or fresh.items != r.asset_audit.items or fresh.blocking_issues:
             raise PlanError('source_changed')
         if p.state == 'not_needed':
             if p.selections or fresh.counts()['detected'] or not validate_replacements(state, state, ()).ready:

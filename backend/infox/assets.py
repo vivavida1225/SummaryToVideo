@@ -9,7 +9,7 @@ import re
 import unicodedata
 from datetime import datetime, timezone
 
-from .asset_models import AssetAudit, AssetHit, AssetItem, AssetIssue, AssetPolicy, AssetReference
+from .asset_models import AssetAudit, AssetHit, AssetItem, AssetIssue, AssetPolicy, AssetReference, blocking_asset_issues
 
 
 FIELDS = ('title', 'title_ko', 'video_title_raw', 'tags', 'description', 'text_body',
@@ -283,7 +283,7 @@ def audit_assets(state: dict, *, template_id: int, run_id: str, video_id: str,
                         metadata_sources=tuple(dict.fromkeys(metadata_sources))))
     if not items:
         issue('no_inspectable_assets')
-    partial = bool(issues) or any(item.verdict == 'unknown' for item in items)
+    partial = bool(blocking_asset_issues(issues))
     return AssetAudit(state='needs_attention' if partial else 'completed',
         audited_at=datetime.now(timezone.utc).isoformat(), source_version=version, policy=policy,
         items=tuple(items), issues=tuple(issues), error_code='inspection_incomplete' if partial else None)

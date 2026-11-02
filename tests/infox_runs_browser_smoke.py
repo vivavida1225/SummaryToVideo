@@ -103,10 +103,11 @@ def main():
                     return value
                 async def incomplete_assets(video_id):
                     value = await original_read(video_id)
-                    # Leave metadata incomplete, so automation correctly stops
-                    # before any save. Subsequent read-only audit repairs it.
+                    # A structural graph failure still stops automation. Unknown
+                    # metadata alone must no longer prevent subsequent planning.
                     for scene in value['video']['scenes']:
                         scene['rootShape']['layers']['media']['props']['media'].pop('title', None)
+                        scene['rootShape']['layers']['ROOT']['child'].append('missing-layer')
                     return value
                 fake.video_state = incomplete_assets
                 run_manager.client_factory = lambda: fake
@@ -124,7 +125,6 @@ def main():
                 expect(page.get_by_text('확인이 필요합니다. 기존 실행 상태를 확인하세요.', exact=True)).to_be_visible()
                 assert len(start_requests) == 1 and fake.calls == ['project', 'generation']
                 # Reinspection changes only asset metadata, never the transmission snapshot.
-                complete_metadata = False
                 saved_state = None
                 async def problem_assets(video_id):
                     if saved_state is not None:
@@ -136,26 +136,24 @@ def main():
                     scene['rootShape'] = {'layers': {'ROOT': {'child': ['assigned']}, 'assigned': layer({
                         'title': '오래된 삼성 템플릿 제목', 'image_files': [image('hit.jpg'), image('neutral.jpg'), image('missing.jpg')]})}}
                     scene['rerank_result'] = [image('hit.jpg', tags=['삼성전자']), image('neutral.jpg', title='중립 설비')]
-                    if complete_metadata:
-                        scene['rerank_result'].append(image('missing.jpg',title='중립 자료'))
                     return value
                 fake.video_state = problem_assets
+                favorites = FavoritesClient([favorite(),favorite(1)])
+                fake.search_favorites = favorites.search_favorites
+                fake.favorite_segment_available = favorites.favorite_segment_available
                 page.get_by_role('button', name='배정 에셋 다시 검사', exact=True).click()
                 expect(page.get_by_text('기업명 검출 1 · 메타데이터 미검출 2 · 확인 불가 1 · 즐겨찾기 예외 0', exact=True)).to_be_visible(timeout=10000)
                 expect(page.get_by_text('삼성전자 · tags[0]', exact=True)).to_be_visible()
                 expect(page.get_by_text('해당 파일의 검사할 메타데이터가 없습니다.', exact=True)).to_be_visible()
+                expect(page.get_by_text('확인 불가 항목은 미검출처럼 교체 대상에서 제외하며, 다음 단계 진행을 막지 않습니다.', exact=True)).to_be_visible()
                 page.reload(wait_until='networkidle')
                 expect(page.get_by_text('기업명 검출 1 · 메타데이터 미검출 2 · 확인 불가 1 · 즐겨찾기 예외 0', exact=True)).to_be_visible()
-                assert run_manager.store.get(record['id']).stage == 'needs_attention'
+                expect(page.get_by_text('교체 계획 검증 완료 · 서버에는 저장하지 않았습니다.', exact=True)).to_be_visible(timeout=10000)
+                assert run_manager.store.get(record['id']).stage == 'replacement_planned'
                 assert run_manager.store.get(record['id']).snapshot.text == edited
                 assert fake.calls == ['project', 'generation'] and len(start_requests) == 1
-                # Complete the missing metadata, then build a mixed local plan.
+                # Keep the unknown metadata and plan only the detected asset.
                 # Favorite titles containing a restricted company remain eligible.
-                favorites = FavoritesClient([favorite(),favorite(1)])
-                fake.search_favorites = favorites.search_favorites
-                fake.favorite_segment_available = favorites.favorite_segment_available
-                complete_metadata = True
-                page.get_by_role('button', name='배정 에셋 다시 검사', exact=True).click()
                 expect(page.get_by_text('교체 계획 검증 완료 · 서버에는 저장하지 않았습니다.', exact=True)).to_be_visible(timeout=10000)
                 expect(page.get_by_text('고정 구간 1개 · 대체 대상 1개', exact=True)).to_be_visible()
                 chosen = run_manager.store.get(record['id']).replacement_plan.selections[0].candidate
@@ -184,6 +182,8 @@ def main():
                 expect(page.get_by_text('서버를 다시 읽어 적용·보존 결과를 확인하는 중…', exact=True)).to_be_visible()
                 expect(page.get_by_text('서버 저장·재조회 검증 완료', exact=True)).to_be_visible(timeout=10000)
                 assert len(saves) == 1 and len(run_manager.store.get(record['id']).favorite_replacements) == 1
+                final_media = saved_state['video']['scenes'][0]['rootShape']['layers']['assigned']['props']['media']
+                assert final_media['image_files'][2]['filename'] == 'missing.jpg'
                 page.reload(wait_until='networkidle')
                 expect(page.get_by_text('서버 저장·재조회 검증 완료', exact=True)).to_be_visible()
                 assert len(saves) == 1 and fake.calls == ['project','generation']

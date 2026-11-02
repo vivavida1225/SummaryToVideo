@@ -1,0 +1,24 @@
+{
+  "checked_at_kst": "2026-11-02T16:45:03.081260+09:00",
+  "existing_latest_run_read_only": true,
+  "previous_audit_state": "needs_attention",
+  "previous_audit_error": "inspection_incomplete",
+  "new_audit_state": "completed",
+  "new_audit_error": null,
+  "counts": {
+    "detected": 4,
+    "not_detected": 4,
+    "unknown": 2,
+    "favorite_exempt": 0
+  },
+  "blocking_issue_count": 0,
+  "unknown_reasons": [
+    "metadata_missing",
+    "metadata_missing"
+  ],
+  "draft_ready": true,
+  "record_unchanged": true,
+  "remote_video_writes": 0,
+  "automatic_run_resumed": false,
+  "actual_replacement_save_verified": false
+}

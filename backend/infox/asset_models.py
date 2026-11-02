@@ -70,6 +70,12 @@ class AssetIssue(AuditModel):
         'invalid_media', 'invalid_bundle', 'inspection_limit', 'no_inspectable_assets', 'version_missing', 'metadata_unreadable']
 
 
+def blocking_asset_issues(issues):
+    # Unreadable descriptive metadata is informational under the user's policy.
+    # Structural, identity, version and traversal-budget failures still block.
+    return tuple(issue for issue in issues if issue.code != 'metadata_unreadable')
+
+
 class FavoriteReplacement(AuditModel):
     """Only a future verified save may create this; never accept remote favorite flags."""
     run_id: str = Field(pattern=r'^[0-9a-f]{32}$')
@@ -103,10 +109,14 @@ class AssetAudit(AuditModel):
     issues: tuple[AssetIssue, ...] = ()
     error_code: Literal['authentication_required', 'read_failed', 'draft_changed', 'inspection_incomplete'] | None = None
 
+    @property
+    def blocking_issues(self) -> tuple[AssetIssue, ...]:
+        return blocking_asset_issues(self.issues)
+
     @model_validator(mode='after')
     def complete_has_evidence(self):
         if self.state == 'completed' and (not self.audited_at or not self.source_version or not self.items
-                or self.issues or self.error_code or any(item.verdict == 'unknown' for item in self.items)):
+                or self.blocking_issues or self.error_code):
             raise ValueError('incomplete inspection')
         return self
 

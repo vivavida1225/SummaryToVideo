@@ -68,8 +68,9 @@ def test_only_connected_automatic_layers_and_exact_video_segments_are_inspected(
     assert report.items[0].reference.segment == 'clip-1.mp4'
 
 
-def test_missing_metadata_and_unknown_graph_never_become_clean_audits():
-    assert audit(state(candidates=[])).items[0].verdict == 'unknown'
+def test_missing_metadata_is_nonblocking_while_unknown_graph_still_blocks():
+    report = audit(state(candidates=[]))
+    assert report.items[0].verdict == 'unknown' and report.state == 'completed'
     for mutation in ('missing_child', 'cycle', 'no_marker', 'no_root', 'unknown_type', 'bad_bundle'):
         s = state()
         layers = s['video']['scenes'][0]['rootShape']['layers']
@@ -124,7 +125,9 @@ def test_verified_favorite_history_binds_exact_placement_and_segment():
 def test_incomplete_report_cannot_be_labeled_completed():
     from pydantic import ValidationError
     from backend.infox.asset_models import AssetAudit
-    incomplete = audit(state(candidates=[])).model_dump()
+    value = state(candidates=[])
+    value['video']['scenes'][0]['rootShape']['layers']['ROOT']['child'].append('missing')
+    incomplete = audit(value).model_dump()
     incomplete['state'] = 'completed'
     with pytest.raises(ValidationError):
         AssetAudit.model_validate(incomplete)
@@ -155,14 +158,15 @@ def test_joined_bundle_parent_cannot_supply_its_stale_title():
 
 
 @pytest.mark.parametrize('deep', [False, True])
-def test_unsupported_metadata_or_depth_limit_is_not_silently_negative(deep):
+def test_unsupported_metadata_remains_unknown_but_does_not_block(deep):
     tags = {'unexpected': ['삼성']}
     if deep:
         tags = '삼성'
         for _ in range(10):
             tags = [tags]
     report = audit(state(candidates=[image(title='neutral', tags=tags)]))
-    assert report.state == 'needs_attention' and report.items[0].verdict == 'unknown'
+    assert report.state == 'completed' and report.items[0].verdict == 'unknown'
+    assert report.issues and not report.blocking_issues
 
 
 def test_blank_optional_fields_are_absent_metadata_and_video_frame_conflicts_do_not_join():

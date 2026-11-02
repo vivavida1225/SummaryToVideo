@@ -25,7 +25,7 @@ async def prepare_plan(store,client,r):
         fresh=audit_assets(state,template_id=r.snapshot.settings.template_id,run_id=r.id,video_id=r.video_id,
                            verified_replacements=r.favorite_replacements,policy=r.asset_audit.policy)
         if (fresh.state!='completed' or fresh.source_version!=r.asset_audit.source_version
-                or fresh.items!=r.asset_audit.items or fresh.issues):
+                or fresh.items!=r.asset_audit.items or fresh.blocking_issues):
             raise PlanError('source_changed')
         fingerprint=state_fingerprint(state)
         previous=r.replacement_plan
