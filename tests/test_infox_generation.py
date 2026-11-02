@@ -24,8 +24,11 @@ def prepared(root):
 
 
 def draft(record):
-    return {'id': 'video-1', 'can_edit': True, 'video': {'scenes': [
-        {'voiceover': {'content': s.text, 'filename': 'voice.wav', 'bucket': 'voice',
+    return {'id': 'video-1', 'updated_at': '2026-11-02T01:00:00Z', 'can_edit': True, 'video': {'scenes': [
+        {'id': f'scene-{s.scene_index}', 'rootShape': {'layers': {'ROOT': {'child': ['media']},
+         'media': {'type': {'resolvedName': 'ImageLayer'}, 'child': [], 'props': {
+             'aigeneratable': {'auto_select': True}, 'media': {'bucket': 'images', 'filename': 'photo.jpg', 'title': '중립 설비'}}}}},
+         'voiceover': {'content': s.text, 'filename': 'voice.wav', 'bucket': 'voice',
          'audio_duration': 2.0, 'voice_id': record.snapshot.settings.voice_id,
          'voice_provider': 'elevenlabs', 'voice_speed': '1.0',
          'segment_captions': [{'text': s.text, 'startMs': 0, 'endMs': 2000}]}}
@@ -152,7 +155,7 @@ def test_manager_one_shot_admission_early_event_reconnect_and_delayed_data(tmp_p
         await asyncio.gather(manager.start(record.id), manager.start(record.id))
         await manager.wait(record.id)
         final = store.get(record.id)
-        assert final.stage == 'draft_ready'
+        assert final.stage == 'assets_audited' and final.asset_audit.state == 'completed'
         assert final.video_id == 'video-1' and final.task_id == 'task-1'
         assert final.tracking.completion_seen and final.tracking.draft.ready
         assert final.tracking.event_count == 1 and final.tracking.reconnects >= 1
@@ -218,9 +221,9 @@ def test_start_api_is_guarded_and_background_run_can_be_polled(tmp_path):
         assert c.post(url, headers=headers).status_code == 202
         for _ in range(100):
             result = c.get(f'/api/infox-runs/{r["id"]}', headers=headers).json()
-            if result['stage'] == 'draft_ready': break
+            if result['stage'] == 'assets_audited': break
             time.sleep(.01)
-        assert result['stage'] == 'draft_ready'
+        assert result['stage'] == 'assets_audited'
         assert result['editor_url'].endswith('/video-1?chatboxView=script')
         assert fake.calls == ['project', 'generation']
 
@@ -241,7 +244,7 @@ def test_auth_failure_before_send_can_resume_same_snapshot(tmp_path):
         fake.authenticate = good_auth
         await manager.start(record.id)
         await manager.wait(record.id)
-        assert store.get(record.id).stage == 'draft_ready'
+        assert store.get(record.id).stage == 'assets_audited'
         await manager.close()
     asyncio.run(scenario())
 
@@ -301,7 +304,7 @@ def test_persisted_completion_recovers_read_only_and_auth_error_is_distinct(tmp_
         fake.video_state = good_read
         await manager.start(r.id)
         await manager.wait(r.id)
-        assert store.get(r.id).stage == 'draft_ready' and fake.calls == []
+        assert store.get(r.id).stage == 'assets_audited' and fake.calls == []
         await manager.close()
     asyncio.run(scenario())
 

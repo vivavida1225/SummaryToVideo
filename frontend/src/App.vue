@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api, ApiError, bootstrapSession } from './api'
 import ResultPanel from './components/ResultPanel.vue'
 import StatusTimeline from './components/StatusTimeline.vue'
+import InfoXAssetAudit from './components/InfoXAssetAudit.vue'
 import type { InfoXPrepareInput, InfoXRun, Job, SessionInfo, SourceFile } from './types'
 
 const JOB_STORAGE_KEY = 'market-compressor.job-id'
@@ -49,12 +50,13 @@ const infoxRun = ref<InfoXRun | null>(null)
 const infoxLoading = ref(false)
 const infoxStarting = ref(false)
 let infoxPollTimer: number | undefined
-const infoxActiveStages = new Set(['creating_project', 'project_created', 'starting_generation', 'generating', 'checking_draft'])
+const infoxActiveStages = new Set(['creating_project', 'project_created', 'starting_generation', 'generating', 'checking_draft', 'auditing_assets'])
 const infoxStageLabels: Record<string, string> = {
   prepared: '전송본 확정 · 제작 요청 전', creating_project: 'InfoX 프로젝트 생성 요청 중',
   project_created: '프로젝트 접수 · 영상 ID 확보', starting_generation: '시안 제작 시작 요청 중',
   generating: '시안 제작 중 · 현재 작업의 완료 신호 대기', checking_draft: '완료 신호 수신 · 대본·음성·자막 확인 중',
-  draft_ready: '시안 준비 확인 · 에셋 검사는 다음 단계입니다.',
+  draft_ready: '시안 준비 확인 · 에셋 검사를 시작할 수 있습니다.',
+  auditing_assets: '실제 배정 에셋의 기업명 검사 중', assets_audited: '기업 에셋 검사 완료 · 교체는 다음 단계입니다.',
   needs_attention: '확인이 필요합니다. 기존 실행 상태를 확인하세요.', failed: '제작 실패가 확인되었습니다.',
 }
 const infoxErrorLabels: Record<string, string> = {
@@ -185,6 +187,24 @@ async function startInfox() {
     if (!disposed && infoxRun.value?.id === id) {
       infoxError.value = '요청 결과가 불명확합니다. 보관된 실행을 조회합니다. ' + friendlyError(error)
       pollInfox(id) // Only GET; never replay an uncertain start POST.
+    }
+  } finally { infoxStarting.value = false }
+}
+
+async function auditInfox() {
+  if (!infoxRun.value || infoxStarting.value || infoxLoading.value || inputBusy.value) return
+  const id = infoxRun.value.id
+  infoxStarting.value = true
+  infoxError.value = ''
+  try {
+    const record = await withInfoxSession(() => api.auditInfox(id))
+    if (disposed || infoxRun.value?.id !== id) return
+    infoxRun.value = record
+    pollInfox(id)
+  } catch (error) {
+    if (!disposed && infoxRun.value?.id === id) {
+      infoxError.value = '검사 요청 결과를 조회합니다. ' + friendlyError(error)
+      pollInfox(id)
     }
   } finally { infoxStarting.value = false }
 }
@@ -827,11 +847,16 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
             <p v-if="infoxRun.requires_reconciliation">접수 여부 확인이 필요합니다. 기존 실행은 다시 전송하지 않습니다.</p>
             <p v-if="infoxChanged">현재 편집본 또는 설정이 확정본과 다릅니다.</p>
             <p v-if="infoxRun.video_id">영상 ID: {{ infoxRun.video_id }} · 작업 ID: {{ infoxRun.task_id ?? '접수 확인 전' }}</p>
-            <button v-if="['prepared', 'needs_attention', 'project_created'].includes(infoxRun.stage)" type="button" class="ghost-button"
+            <button v-if="['prepared', 'needs_attention', 'project_created'].includes(infoxRun.stage) && (!infoxRun.asset_audit || infoxRun.asset_audit.state === 'not_started')" type="button" class="ghost-button"
               :disabled="inputBusy || infoxLoading || infoxStarting" @click="startInfox">
               {{ infoxStarting ? '요청 확인 중…' : infoxRun.stage === 'prepared' ? '확정본으로 InfoX 제작 시작' : '기존 실행 상태 다시 확인' }}
             </button>
             <button v-if="infoxActiveStages.has(infoxRun.stage)" type="button" class="ghost-button" @click="pollInfox(infoxRun.id)">진행 상태 다시 조회</button>
+            <button v-if="infoxRun.tracking?.completion_seen && !infoxRun.requires_reconciliation && (['draft_ready', 'assets_audited', 'needs_attention'].includes(infoxRun.stage) || (infoxRun.stage === 'auditing_assets' && !infoxRun.tracking_active))"
+              type="button" class="ghost-button" :disabled="inputBusy || infoxLoading || infoxStarting || infoxRun.tracking_active" @click="auditInfox">
+              {{ infoxStarting ? '검사 요청 중…' : !infoxRun.asset_audit || infoxRun.asset_audit.state === 'not_started' ? '기업 에셋 검사' : '배정 에셋 다시 검사' }}
+            </button>
+            <InfoXAssetAudit v-if="infoxRun.asset_audit" :audit="infoxRun.asset_audit" />
             <p v-if="infoxRun.editor_url"><a :href="infoxRun.editor_url" target="_blank" rel="noopener noreferrer">InfoX 편집 화면 수동 열기</a></p>
           </div>
         </section>

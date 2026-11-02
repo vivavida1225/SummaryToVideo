@@ -1,0 +1,110 @@
+{
+  "verified_at_kst": "2026-11-02T13:08:58.313851+09:00",
+  "existing_phase3_run_reused": true,
+  "stage": "assets_audited",
+  "audit_state": "completed",
+  "counts": {
+    "detected": 0,
+    "not_detected": 9,
+    "unknown": 0,
+    "favorite_exempt": 0
+  },
+  "item_count": 9,
+  "automatic_layer_count": 3,
+  "same_snapshot": true,
+  "same_video_and_task": true,
+  "same_receipts": true,
+  "server_version_unchanged": true,
+  "remote_video_writes": 0,
+  "operations": [
+    "authentication",
+    "video_state",
+    "authentication",
+    "video_state"
+  ],
+  "issues": [],
+  "error_code": null,
+  "items": [
+    {
+      "scene_index": 0,
+      "item_index": 0,
+      "kind": "image",
+      "verdict": "not_detected",
+      "reason": "metadata_inspected",
+      "hits": [],
+      "matched_metadata_sources": 1
+    },
+    {
+      "scene_index": 0,
+      "item_index": 1,
+      "kind": "image",
+      "verdict": "not_detected",
+      "reason": "metadata_inspected",
+      "hits": [],
+      "matched_metadata_sources": 1
+    },
+    {
+      "scene_index": 0,
+      "item_index": 2,
+      "kind": "image",
+      "verdict": "not_detected",
+      "reason": "metadata_inspected",
+      "hits": [],
+      "matched_metadata_sources": 1
+    },
+    {
+      "scene_index": 0,
+      "item_index": 0,
+      "kind": "image",
+      "verdict": "not_detected",
+      "reason": "metadata_inspected",
+      "hits": [],
+      "matched_metadata_sources": 1
+    },
+    {
+      "scene_index": 0,
+      "item_index": 1,
+      "kind": "image",
+      "verdict": "not_detected",
+      "reason": "metadata_inspected",
+      "hits": [],
+      "matched_metadata_sources": 1
+    },
+    {
+      "scene_index": 0,
+      "item_index": 2,
+      "kind": "image",
+      "verdict": "not_detected",
+      "reason": "metadata_inspected",
+      "hits": [],
+      "matched_metadata_sources": 1
+    },
+    {
+      "scene_index": 1,
+      "item_index": 0,
+      "kind": "image",
+      "verdict": "not_detected",
+      "reason": "metadata_inspected",
+      "hits": [],
+      "matched_metadata_sources": 1
+    },
+    {
+      "scene_index": 1,
+      "item_index": 1,
+      "kind": "image",
+      "verdict": "not_detected",
+      "reason": "metadata_inspected",
+      "hits": [],
+      "matched_metadata_sources": 1
+    },
+    {
+      "scene_index": 1,
+      "item_index": 2,
+      "kind": "image",
+      "verdict": "not_detected",
+      "reason": "metadata_inspected",
+      "hits": [],
+      "matched_metadata_sources": 1
+    }
+  ]
+}

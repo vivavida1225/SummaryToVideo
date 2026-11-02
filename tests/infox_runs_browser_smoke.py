@@ -17,6 +17,7 @@ from backend.infox.store import RunStore
 from backend.jobs import JobManager
 from tests.test_api import Clipboard
 from tests.test_infox_generation import FakeClient
+from tests.test_infox_assets import image, layer
 
 
 def main():
@@ -93,24 +94,44 @@ def main():
                 start_requests = []
                 page.on('request', lambda req: start_requests.append(req.url) if req.url.endswith('/start') else None)
                 page.get_by_role('button', name='확정본으로 InfoX 제작 시작', exact=True).click()
-                expect(page.get_by_text('시안 준비 확인 · 에셋 검사는 다음 단계입니다.', exact=True)).to_be_visible(timeout=10000)
+                expect(page.get_by_text('기업 에셋 검사 완료 · 교체는 다음 단계입니다.', exact=True)).to_be_visible(timeout=10000)
+                expect(page.get_by_role('region', name='기업 에셋 검사 결과')).to_be_visible()
                 link = page.get_by_role('link', name='InfoX 편집 화면 수동 열기')
                 expect(link).to_have_attribute('href', 'https://infox2.infomaxai.com/studio/library/videos/video-1?chatboxView=script')
                 assert fake.calls == ['project', 'generation']
                 assert run_manager.store.get(record['id']).snapshot.text == edited
                 page.reload(wait_until='networkidle')
-                expect(page.get_by_text('시안 준비 확인 · 에셋 검사는 다음 단계입니다.', exact=True)).to_be_visible()
+                expect(page.get_by_text('기업 에셋 검사 완료 · 교체는 다음 단계입니다.', exact=True)).to_be_visible()
                 assert len(start_requests) == 1 and fake.calls == ['project', 'generation']
+                # Reinspection changes only asset metadata, never the transmission snapshot.
+                original_read = fake.video_state
+                async def problem_assets(video_id):
+                    value = await original_read(video_id)
+                    scene = value['video']['scenes'][0]
+                    scene['rootShape'] = {'layers': {'ROOT': {'child': ['assigned']}, 'assigned': layer({
+                        'title': '오래된 삼성 템플릿 제목', 'image_files': [image('hit.jpg'), image('neutral.jpg'), image('missing.jpg')]})}}
+                    scene['rerank_result'] = [image('hit.jpg', tags=['삼성전자']), image('neutral.jpg', title='중립 설비')]
+                    return value
+                fake.video_state = problem_assets
+                page.get_by_role('button', name='배정 에셋 다시 검사', exact=True).click()
+                expect(page.get_by_text('기업명 검출 1 · 메타데이터 미검출 2 · 확인 불가 1 · 즐겨찾기 예외 0', exact=True)).to_be_visible(timeout=10000)
+                expect(page.get_by_text('삼성전자 · tags[0]', exact=True)).to_be_visible()
+                expect(page.get_by_text('해당 파일의 검사할 메타데이터가 없습니다.', exact=True)).to_be_visible()
+                page.reload(wait_until='networkidle')
+                expect(page.get_by_text('기업명 검출 1 · 메타데이터 미검출 2 · 확인 불가 1 · 즐겨찾기 예외 0', exact=True)).to_be_visible()
+                assert run_manager.store.get(record['id']).stage == 'needs_attention'
+                assert run_manager.store.get(record['id']).snapshot.text == edited
+                assert fake.calls == ['project', 'generation'] and len(start_requests) == 1
                 # Verify layout and capture only synthetic test data.
                 for width in (390, 1440):
                     page.set_viewport_size({'width': width, 'height': 1000})
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                     page.get_by_role('heading', name='영상 전송본 준비').scroll_into_view_if_needed()
-                    page.screenshot(path=str(root / f'.runtime/infox-phase3-{width}.png'), full_page=True)
+                    page.screenshot(path=str(root / f'.runtime/infox-phase4-{width}.png'), full_page=True)
                 assert not errors, errors
                 assert not external_requests, 'Unexpected external browser requests'
                 browser.close()
-            print('PASS: saved snapshot/review, one-shot generation, task completion/draft checks, manual editor link, reload without resend, responsive layout, no external browser requests')
+            print('PASS: saved snapshot/review, one-shot generation, automatic asset audit, reinspection with detected/unknown items, persisted results, responsive layout, no remote video writes or external browser requests')
         finally:
             server.should_exit = True
             thread.join(timeout=10)

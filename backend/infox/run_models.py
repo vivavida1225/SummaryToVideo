@@ -6,6 +6,7 @@ from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from .asset_models import AssetAudit, FavoriteReplacement
 
 
 def now() -> str:
@@ -87,7 +88,7 @@ class Receipt(StrictModel):
 
 
 RunStage = Literal['prepared', 'creating_project', 'project_created', 'starting_generation', 'generating',
-    'checking_draft', 'draft_ready', 'auditing_assets', 'selecting_favorites', 'replacing_assets', 'saving_assets',
+    'checking_draft', 'draft_ready', 'auditing_assets', 'assets_audited', 'selecting_favorites', 'replacing_assets', 'saving_assets',
     'verifying_assets', 'ready_for_editor', 'needs_attention', 'failed']
 
 
@@ -129,6 +130,8 @@ class RunRecord(StrictModel):
     video_id: str | None = Field(default=None, pattern=r'^[A-Za-z0-9_-]{1,128}$')
     task_id: str | None = Field(default=None, pattern=r'^[A-Za-z0-9_-]{1,128}$')
     tracking: Tracking = Field(default_factory=Tracking)
+    asset_audit: AssetAudit = Field(default_factory=AssetAudit)
+    favorite_replacements: tuple[FavoriteReplacement, ...] = ()
 
     @property
     def requires_reconciliation(self) -> bool:
@@ -142,4 +145,4 @@ def text_hash(text: str) -> str:
 def public_record(record: RunRecord) -> dict:
     editor = f'https://infox2.infomaxai.com/studio/library/videos/{record.video_id}?chatboxView=script' if record.video_id else None
     return {**record.model_dump(mode='json'), 'requires_reconciliation': record.requires_reconciliation,
-            'editor_url': editor}
+            'editor_url': editor, 'asset_counts': record.asset_audit.counts()}

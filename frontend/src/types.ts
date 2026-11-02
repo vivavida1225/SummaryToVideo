@@ -84,6 +84,8 @@ export interface InfoXRun {
   version: number
   requires_reconciliation: boolean
   tracking_active?: boolean
+  asset_audit?: InfoXAssetAudit
+  asset_counts?: Record<string, number>
   snapshot: {
     job_id: string
     revision: number
@@ -103,4 +105,22 @@ export interface InfoXRun {
     reconnects?: number
     draft?: { identity_matches: boolean; scenes_match: boolean; voices_ready: boolean; captions_ready: boolean }
   }
+}
+
+export interface InfoXAssetAudit {
+  state: string
+  audited_at?: string | null
+  error_code?: string | null
+  issues: Array<{ scene_index?: number | null; layer_id?: string | null; code: string }>
+  items: Array<{
+    scene_index: number
+    scene_id?: string | null
+    layer_id: string
+    item_index: number | null
+    verdict: string
+    reason: string
+    reference: { kind: string; bucket?: string | null; filename?: string | null; segment?: string | null }
+    hits: Array<{ term: string; field: string; source: string }>
+    metadata_sources: string[]
+  }>
 }

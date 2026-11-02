@@ -57,7 +57,7 @@ async def main(root: Path = ROOT):
     if marker.exists():
         run_id = json.loads(marker.read_text(encoding='utf-8'))['run_id']
         record = store.get(run_id)
-        if evidence.exists() and record.stage == 'draft_ready':
+        if evidence.exists() and record.tracking.completion_seen and record.tracking.draft.ready:
             # Preserve the original observed event evidence on a read-only rerun.
             print(json.dumps({'stage': record.stage, 'existing_verified_run_reused': True}))
             await jobs.close()

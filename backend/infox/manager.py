@@ -13,6 +13,8 @@ from .run_models import RunError, RunRecord, now
 from .service import creation_body
 from .store import RunStore
 from .tracking import task_event, verify_draft
+from .asset_models import AssetAudit
+from .assets import audit_assets
 
 
 class RunManager:
@@ -25,11 +27,24 @@ class RunManager:
 
     async def start(self, run_id: str, *, recovery: bool = False) -> RunRecord:
         record = self.store.get(run_id)
-        if record.stage in ('draft_ready', 'ready_for_editor', 'failed'):
+        if record.stage in ('draft_ready', 'auditing_assets', 'assets_audited', 'ready_for_editor', 'failed'):
             return record
+        if record.asset_audit.state == 'needs_attention':
+            return await self.audit(run_id)
         if run_id not in self.tasks or self.tasks[run_id].done():
             self.tasks[run_id] = asyncio.create_task(self._execute(run_id, recovery=recovery))
         return record
+
+    async def audit(self, run_id: str) -> RunRecord:
+        record = self.store.get(run_id)
+        if self.active(run_id):
+            if record.stage in ('draft_ready', 'auditing_assets', 'assets_audited'):
+                return record
+            raise RunError('draft_not_ready')
+        claimed = self.store.begin_audit(run_id, expected_version=record.version)
+        if not self.active(run_id):
+            self.tasks[run_id] = asyncio.create_task(self._audit_execute(claimed))
+        return claimed
 
     async def recover(self):
         try:
@@ -39,7 +54,43 @@ class RunManager:
             # Protected InfoX endpoints still report its explicit safe 503 error.
             return
         for record in records:
-            await self.start(record.id, recovery=True)
+            if record.stage == 'auditing_assets':
+                await self.audit(record.id)
+            else:
+                await self.start(record.id, recovery=True)
+
+    async def _audit_with_client(self, client, r):
+        if r.stage != 'auditing_assets':
+            r = self.store.begin_audit(r.id, expected_version=r.version)
+        try:
+            state = await client.video_state(r.video_id)
+            if not verify_draft(r, state).ready:
+                report = AssetAudit(state='needs_attention', audited_at=now(), error_code='draft_changed')
+            else:
+                report = audit_assets(state, template_id=r.snapshot.settings.template_id,
+                    run_id=r.id, video_id=r.video_id, verified_replacements=r.favorite_replacements)
+        except InfoXError as error:
+            code = 'authentication_required' if error.code in ('auth_expired', 'permission_denied', 'configuration_error') else 'read_failed'
+            report = AssetAudit(state='needs_attention', audited_at=now(), error_code=code)
+        except Exception:
+            report = AssetAudit(state='needs_attention', audited_at=now(), error_code='read_failed')
+        return self.store.record_audit(r.id, report, expected_version=r.version)
+
+    async def _audit_execute(self, r):
+        try:
+            async with self.client_factory() as client:
+                await client.authenticate()
+                await self._audit_with_client(client, r)
+        except asyncio.CancelledError:
+            raise
+        except RunError:
+            return
+        except Exception as error:
+            with suppress(RunError):
+                code = 'authentication_required' if isinstance(error, InfoXError) and error.code in (
+                    'auth_expired', 'permission_denied', 'configuration_error') else 'read_failed'
+                self.store.record_audit(r.id, AssetAudit(state='needs_attention', audited_at=now(), error_code=code),
+                                        expected_version=r.version)
 
     async def wait(self, run_id: str):
         if task := self.tasks.get(run_id):
@@ -196,7 +247,9 @@ class RunManager:
                 # Verify access to the already admitted video before any continuation.
                 await client.video_state(r.video_id)
                 if r.tracking.completion_seen:
-                    await self._check(client, r)
+                    ready = await self._check(client, r)
+                    if ready.stage == 'draft_ready':
+                        await self._audit_with_client(client, ready)
                     return
                 queue = asyncio.Queue(maxsize=512)
                 connected = asyncio.Event()
@@ -207,7 +260,10 @@ class RunManager:
                         r = self._update(r, 'project_created', error_code=None)
                     r = await self._send(client, r, 'generation')
                 async with asyncio.timeout(self.tracking_timeout):
-                    await self._track(client, r, queue)
+                    ready = await self._track(client, r, queue)
+                # Draft tracking's deadline must not cancel the next stage's read.
+                if ready.stage == 'draft_ready':
+                    await self._audit_with_client(client, ready)
         except asyncio.CancelledError:
             raise  # Receipts/events already durable; shutdown never replays a write.
         except RunError:

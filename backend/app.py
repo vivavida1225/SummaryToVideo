@@ -60,6 +60,10 @@ class EditCompressedInput(BaseModel):
     revision: int = Field(ge=0, strict=True)
 
 
+class InfoXAuditInput(BaseModel):
+    model_config = ConfigDict(extra='forbid', strict=True)
+
+
 class MyassetInput(BaseModel):
     model_config = ConfigDict(extra='forbid')
     base_date: date
@@ -166,6 +170,7 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
             'job_not_ready': '대본 생성이 끝난 뒤 전송본을 확정하세요.',
             'run_not_found': 'InfoX 실행 기록을 찾을 수 없습니다.',
             'storage_error': 'InfoX 실행 기록을 읽거나 저장하지 못했습니다. 같은 요청으로 다시 확인하세요.',
+            'draft_not_ready': '현재 작업의 완료 신호와 대본·음성·자막 준비를 확인한 뒤 에셋을 검사할 수 있습니다.',
         }
         return JSONResponse({'detail': messages.get(exc.code, 'InfoX 실행 기록과 설정을 확인하세요.'),
                              'code': exc.code, 'run_id': exc.run_id}, status_code=exc.status_code)
@@ -246,6 +251,10 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
     @app.post('/api/infox-runs/{run_id}/start', status_code=202)
     async def start_infox_run(run_id: str):
         return infox_view(await infox_manager.start(run_id))
+
+    @app.post('/api/infox-runs/{run_id}/audit', status_code=202)
+    async def audit_infox_run(run_id: str, data: InfoXAuditInput | None = None):
+        return infox_view(await infox_manager.audit(run_id))
 
     @app.post('/api/jobs/{job_id}/retry', status_code=202)
     async def retry_job(job_id: str, data: ModelInput | None = None):

@@ -81,6 +81,27 @@ async function finishBootstrap() {
 }
 
 describe('App', () => {
+  it('기존 시안의 에셋 검사 응답 유실은 실행 조회로 복구하고 검사 결과를 표시한다', async () => {
+    sessionStorage.setItem('market-compressor.job-id', 'job-1')
+    const run = { ...makeInfoxRun(), stage: 'draft_ready', tracking: { completion_seen: true },
+      asset_audit: { state: 'not_started', items: [], issues: [] } }
+    let audits = 0
+    installBootstrapFetch((path) => {
+      if (path.endsWith('/audit')) { audits++; throw new TypeError('Failed to fetch') }
+      if (path === `/api/infox-runs/${run.id}`) return jsonResponse({ ...run, stage: 'assets_audited', tracking_active: false,
+        asset_audit: { state: 'completed', items: [], issues: [] } })
+      if (path.endsWith('/infox-runs')) return jsonResponse({ run })
+      if (path === '/api/jobs/job-1') return jsonResponse(makeJob({ state: 'completed', compressed: '원본', revision: 0 }))
+      throw new Error(`unexpected ${path}`)
+    })
+    render(App)
+    const button = await screen.findByRole('button', { name: '기업 에셋 검사' })
+    await waitFor(() => expect(button).toBeEnabled())
+    await fireEvent.click(button)
+    await screen.findByText('기업 에셋 검사 완료 · 교체는 다음 단계입니다.', {}, { timeout: 4000 })
+    expect(audits).toBe(1)
+    expect(screen.getByRole('button', { name: '배정 에셋 다시 검사' })).toBeEnabled()
+  })
   it('InfoX 제작 시작 응답 유실은 POST를 반복하지 않고 실행 조회로 복구한다', async () => {
     sessionStorage.setItem('market-compressor.job-id', 'job-1')
     const run = makeInfoxRun()
@@ -101,7 +122,7 @@ describe('App', () => {
     const button = await screen.findByRole('button', { name: '확정본으로 InfoX 제작 시작' })
     await waitFor(() => expect(button).toBeEnabled())
     await fireEvent.click(button)
-    await screen.findByText('시안 준비 확인 · 에셋 검사는 다음 단계입니다.', {}, { timeout: 5000 })
+    await screen.findByText('시안 준비 확인 · 에셋 검사를 시작할 수 있습니다.', {}, { timeout: 5000 })
     expect(starts).toBe(1)
     expect(reads).toBe(2)
   })
@@ -128,7 +149,7 @@ describe('App', () => {
     await waitFor(() => expect(button).toBeEnabled())
     expect(started).toBe(false)
     await fireEvent.click(button)
-    await screen.findByText('시안 준비 확인 · 에셋 검사는 다음 단계입니다.', {}, { timeout: 4000 })
+    await screen.findByText('시안 준비 확인 · 에셋 검사를 시작할 수 있습니다.', {}, { timeout: 4000 })
     expect(starts).toBe(1)
     expect(screen.getByRole('link', { name: 'InfoX 편집 화면 수동 열기' })).toHaveAttribute('rel', 'noopener noreferrer')
     expect(fetchMock.mock.calls.some(([input]) => requestPath(input).includes('/infox-runs/'))).toBe(true)

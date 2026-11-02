@@ -1,8 +1,8 @@
-# InfoX 1·2·3단계 완료 및 4단계 인계
+# InfoX 1·2·3·4단계 완료 및 5단계 인계
 
 작성일: 2026-11-02 (한국 시간). 프로젝트: `C:\WORKS\SummaryToVideo`, 브랜치: `master`.
 
-현재는 **1·2·3단계 완료**다. 아래 기존 단계의 기록은 당시 범위이며, 문서 마지막의 **3단계 구현·실검증·4단계 진입점**이 현재 기준이다. [2단계 실행 문서](phase2-runs.md)의 스냅샷·CAS 계약도 계속 적용한다.
+현재는 **1·2·3·4단계 완료**다. 아래 기존 단계의 기록은 당시 범위이며, 문서 마지막의 **4단계 구현·실검증·5단계 진입점**이 현재 기준이다. [2단계 실행 문서](phase2-runs.md)의 스냅샷·CAS 계약과 3단계의 실제 완료 이벤트 검증도 계속 적용한다.
 
 ## 1단계 완료 기록
 
@@ -224,3 +224,82 @@ SQLite `BEGIN IMMEDIATE` 안에서 실행과 intent 별칭을 함께 커밋한�
 ```
 
 기존 README·scripts/launch.ps1·toggle.cmd·기존 및 검증 outputs는 이번 커밋에서 제외한다. 자격·쿠키·서명 URL·원본 SSE/편집 JSON·실제 영상/작업 ID는 커밋하지 않는다.
+
+## 4단계 추가 기록: 기업 에셋 검사 구현·검증 완료
+
+현재 영상의 실제 배정 참조를 추출해 기업명 검출·메타데이터 미검출·확인 불가·검증된 즐겨찾기 예외를 구분한다. **외부 영상 생성·제작 재시작·배치 변경·저장·브라우저 자동 이동은 하지 않는다.** 새 제작은 3단계의 완료 신호와 준비 검증을 통과한 뒤 검사를 자동 수행한다. 기존 `draft_ready` 실행에는 **기업 에셋 검사**, 이후 실행에는 **배정 에셋 다시 검사** 버튼을 제공한다. `auto_replace=false`도 읽기 전용 검사는 가능하며 교체를 뜻하지 않는다.
+
+### 구현 파일과 상태 계약
+
+| 파일 | 책임 |
+| --- | --- |
+| `backend/infox/asset_models.py` | 불변 엄격 모델: 정책, 파일/구간 참조, 항목/검출 근거/구조 문제, 검사 기록, 검증된 즐겨찾기 교체 이력 |
+| `backend/infox/assets.py` | 네트워크·원본 변경 없는 순수 검사기, ROOT 연결 탐색, 정확한 메타데이터 연결, 별칭·예외 판정 |
+| `backend/infox/run_models.py`, `store.py` | 기존 레코드의 기본값 호환, typed `begin_audit`/`record_audit` CAS, 스냅샷·접수 기록 보존 |
+| `backend/infox/manager.py` | 시안 준비 뒤 자동 검사, 기존 시안 재검사, 인증/조회 오류, 중단된 검사의 읽기 전용 복구 |
+| `backend/app.py` | 기존 가드 안의 `POST /api/infox-runs/{run_id}/audit` |
+| `frontend/src/components/InfoXAssetAudit.vue`, `App.vue`, `api.ts`, `types.ts`, `style.css` | 단계·건수·문제 목록·파일/근거 상세·재검사·복원 |
+| `tests/test_infox_assets.py`, `test_infox_assets_api.py` | 순수 검사, 엄격 모델, CAS, 보안/수명/재개와 쓰기 없는 연결 검증 |
+| `tests/infox_assets_live.py`, `phase4-live-verification.json` | 기존 3단계 실행만 읽는 실제 검증과 민감 값을 제거한 결과 |
+
+- 4단계 진입에는 기존 영상/작업 ID, 두 accepted receipt, 실제 completed, 준비 확인 네 값이 모두 필요하다. `begin_audit(...expected_version=...)`가 `auditing_assets`를 영속화한다.
+- 검사 직전에 같은 영상의 `videostate`를 다시 조회하고 확정 대본·장면·음성·자막을 재검증한다. 달라졌으면 `draft_changed`로 보류하며 스냅샷을 덮어쓰지 않는다.
+- 완전한 메타데이터 검사는 **`assets_audited`**다. 기업명 검출이 있어도 검사를 수행했다는 뜻이며 교체/저장 완료가 아니다. 검사 불가 항목·구조·인증/조회 오류는 **`needs_attention`**이다.
+- `record_audit(...expected_version=...)`는 검사 전용 필드와 단계만 갱신한다. 범용 JSON 갱신·출처 이력 수정 API는 없다. 재시작 시 `auditing_assets`만 같은 영상을 다시 읽어 복구하며 새 프로젝트/제작을 요청하지 않는다.
+- `POST .../audit`는 비동기 202다. 본문은 없거나 빈 객체만 허용하고 클라이언트의 즐겨찾기 이력 등 추가 필드를 거절한다. 이후 기존 실행 ID GET으로 `asset_audit`, `asset_counts`, `tracking_active`를 조회한다. 응답 유실/재로드는 GET으로 복원한다.
+- 제작 추적의 600초 제한은 제작 단계에만 적용한다. 검사는 그 제한 밖에서 기존 HTTP 읽기 시간/재시도 제한을 사용한다. 진행 작업과 재검사 클릭이 겹쳐도 새 CAS 소유권을 빼앗지 않는다. 멈춘 검사에는 재검사 버튼도 제공한다.
+
+### 검사와 연결 규칙
+
+1. 장면의 `ROOT.child`를 따라 실제 연결된 노드만 방문한다. 부모 누락·잘못된 child·순환/중복 연결은 구조 문제다. 분리된 레이어 사전 항목은 검사하지 않는다.
+2. 현재 검증한 템플릿은 **1786**이다. `ImageLayer`/`VideoLayer`에서 `auto_select is True`만 자동 배정으로 검사한다. 명확한 false는 수동/템플릿 배치로 제외하고, 표식 부재·잘못된 값·미지 레이어는 확인 불가다. 실제 관찰한 `TextLayer4`와 미디어 없는 `ShapeLayer` 벡터 장식은 비미디어로 구분한다. 임의의 미지 타입을 비미디어로 추정하지 않는다.
+3. 사진 묶음은 `image_files[]` 각 항목을 검사한다. 부모의 제목/태그는 사용하지 않으며 **연결 메타데이터 안의 묶음 부모도 제외**한다. 직접 영상은 부모의 bucket/filename/segment/videoId를 사용한다. VideoLayer에 사진 묶음이 함께 남으면 어느 참조가 실제인지 임의 선택하지 않고 `ambiguous_media`로 보류한다.
+4. 같은 장면의 `rerank_result`, 필요 시 `search_metadata`에서 **bucket+filename 정확 일치**만 연결한다. 영상은 segment 및 알려진 원영상 ID도 일치해야 하며, 함께 존재하는 frameIndex/timestamp/프레임 범위가 충돌하면 연결하지 않는다. 영상 ID만 같은 다른 구간, 대본, 검색어, 다른 장면/파일의 후보는 근거가 아니다.
+5. 검사 필드는 명세 §8의 title/title_ko/video_title_raw/tags/description/text_body/img_description_ai/frame_visual_caption/frame_stt다. 문자열·목록과 명시적으로 지원한 텍스트 구조만 읽는다. 알 수 없는 구조나 깊이 제한으로 읽지 못한 정보는 `metadata_unreadable`이며, 다른 제목이 중립적이라는 이유로 미검출을 확정하지 않는다. 빈 문자열·빈 목록·null은 비어 있는 선택 필드로 구분한다.
+6. 정책의 기본 별칭은 **삼성전자, SK하이닉스, 삼성, SK, 하이닉스, 삼전닉스**다. `AssetPolicy.aliases`로 관리하며 임의 별칭을 자동 추가하지 않는다. 검사본에서만 NFKC·casefold·별칭 문자 사이 공백을 정규화한다. SK 시작/끝의 ASCII 영숫자 경계를 유지해 sketch/SKY/단어 내부를 오탐하지 않는다. 원본 객체는 수정하지 않는다.
+7. 유효한 파일 참조와 검사할 텍스트가 없으면 unknown이다. 미검출은 검사한 메타데이터의 결과이며 시각적 기업명·로고 부재 보증이 아니다. 검사 예산은 그래프·메타데이터·묶음/본문 항목을 포함해 기본 10,000이며 초과를 완료로 숨기지 않는다.
+
+각 항목에는 장면 index/ID, 레이어 ID, 묶음 index, 안전한 파일/구간 식별자, 판정/사유, 검출 별칭·필드·근거 경로를 저장한다. 원문 설명·제목·서명 URL은 기록하지 않는다. 파일 참조에 URL/쿼리/제어문자가 섞이면 식별 불가로 남긴다.
+
+### 즐겨찾기 예외의 신뢰 경계
+
+`FavoriteReplacement`는 이후 **실제 저장 후 검증한 출처 이력**을 위한 모델이다. 현재 4단계는 이를 새로 만들어 저장하는 경로나 API를 제공하지 않는다. 원격 `is_favorite=true`만으로는 면제하지 않는다.
+
+예외는 run/video/장면 index와 ID/레이어/묶음 index/파일·선택 구간 참조 전체가 현재 배치와 같고, favorites_only·저장 검증이 참인 내부 기록에만 적용한다. 출처는 video/uservideo, 검색어는 반도체다. 일치하면 메타데이터 유무/기업명으로 재검열하지 않고 favorite_exempt를 반환한다. 파일·구간·배치가 바뀌면 예외도 사라진다. 5단계 후보 출처와 6단계 실제 저장 검증이 이 기록을 만드는 책임을 이어받는다.
+
+### 실제 확인과 남은 검증
+
+**2026-11-02 13:08:58 한국 시간**에 기존 3단계 검증 실행을 다시 사용했다. 2개 장면의 자동 배정 ImageLayer 3개에서 사진 **9개 배치**를 추출했고, 각 파일을 동일 장면의 메타데이터와 연결했다. 결과는 **검출 0 / 메타데이터 미검출 9 / 확인 불가 0 / 즐겨찾기 예외 0**이며 `assets_audited`다. 같은 파일이 여러 배치에 있어도 배치별 항목으로 보존한다.
+
+검사 전후 snapshot·영상/작업 ID·두 receipt와 서버 updated_at이 같았다. 허용 요청을 인증과 해당 영상 `videostate`로 제한한 검증 클라이언트를 사용했고 **외부 영상 쓰기 0회**였다. 실검증 자료는 원문/파일/장면/레이어/실행 ID를 제거한 `phase4-live-verification.json`이다. 실제 ID 연결은 기존 Git 제외 DB·phase3 marker에만 남긴다.
+
+이 실제 실행에는 직접 자동 배정 영상·기업명 검출·검증된 즐겨찾기 교체 이력이 없었다. 해당 경로의 검증은 통제된 데이터 근거이며 실제 서비스의 모든 스키마를 확인했다는 뜻이 아니다. 실제 장면의 미디어 없는 ShapeLayer 장식도 확인해 타입을 명시적으로 지원했다. OCR·프레임/로고 검사·실제 재생은 이번 범위에 없다.
+
+### 5단계 작업자의 진입점
+
+- `stage == assets_audited`, `asset_audit.state == completed`인 실행의 `items`에서 detected를 대체 검토 대상으로 사용한다. unknown/구조 문제가 있으면 needs_attention을 유지하고 전체 교체 성공으로 넘어가지 않는다. 미검출은 시각적 검수 통과가 아니다.
+- 후보를 고르기 전에 동일 video_id의 최신 상태·서버 버전을 읽고 검사 당시 source_version, 배치/파일/구간과 비교한다. 서버에서 바뀌었으면 이 검사 결과로 과거 파일을 덮어쓰지 말고 재검사한다.
+- 다음은 §9의 favorites_only=true/search=반도체 조회, 구간 후보 선택과 출처, 로컬 교체 계획/보존 검증이다. 즐겨찾기 후보에 기업명 제한을 다시 적용하지 않는다.
+- 현재 저장 모델의 `favorite_replacements`는 비어 있는 것이 정상이다. 실제로 저장되지 않은 계획/선택만으로 saved_verified 이력을 만들지 않는다. 6단계의 서버 재조회까지 확인한 뒤 별도 CAS 메서드로 기록한다.
+- stage를 `selecting_favorites`로 바꾸는 typed 계획 저장, 정확한 구간의 통합 참조, 혼합 묶음 보존 검증은 5단계에서 추가한다. 외부 배치 저장과 자동 이동은 각각 6·7단계다. 기존 begin_request/record_outcome 쓰기 경계·불명확한 접수 재전송 금지를 계속 유지한다.
+
+### 4단계 검증·리뷰·전달
+
+- 4단계 전용 백엔드: **30 passed**. 순수 검사 24개와 저장/API/재개/수명 6개다.
+- 전체 백엔드: **517 passed**, 기존 의존성 deprecation 경고 3개. 이전 단계의 PSModulePath 설정으로 런처 테스트를 포함했다.
+- 프런트엔드: **62 passed**, vue-tsc 타입 검사와 Vite 프로덕션 빌드 성공.
+- 실제 로컬 FastAPI + Edge Chromium: 자동 검사, 검출/확인 불가가 섞인 재검사 목록, 스냅샷 불변, 재로드 후 검사 결과 복원, 수동 링크, 390/1440px 레이아웃 성공. 통제된 InfoX 클라이언트를 사용했으며 외부 브라우저 요청과 추가 영상 쓰기는 0회다.
+- 독립 리뷰: Critical 0 / Important 5. 미지 레이어 무시, VideoLayer의 잔여 사진 참조, 메타데이터 묶음 부모의 오래된 제목, 읽지 못한 메타데이터의 미검출 오판, 제작 시간 제한의 검사 취소 문제를 모두 실패 테스트로 재현 후 수정했다. 검사 예산·즐겨찾기 예외·자동 검사와 수동 클릭 경합도 회귀로 고정했다.
+
+```powershell
+.venv/Scripts/python.exe -m pytest tests/test_infox_assets.py tests/test_infox_assets_api.py -q
+.venv/Scripts/python.exe -m pytest -q
+.tools/node/node.exe frontend/node_modules/vitest/vitest.mjs run --root frontend
+.tools/node/node.exe frontend/node_modules/vue-tsc/bin/vue-tsc.js -b frontend/tsconfig.json
+.tools/node/node.exe frontend/node_modules/vite/bin/vite.js build frontend
+.venv/Scripts/python.exe -m tests.infox_runs_browser_smoke
+# 기존 실행만 읽음. marker가 없으면 실패하며 새 영상을 만들지 않는다.
+.venv/Scripts/python.exe -m tests.infox_assets_live
+```
+
+기존 README·scripts/launch.ps1·toggle.cmd·outputs와 원본 자격/DB는 보존하고 이번 커밋에서 제외한다. 3단계 실제 이벤트 근거도 그대로 보존한다.

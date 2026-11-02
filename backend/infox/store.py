@@ -12,6 +12,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from .run_models import Receipt, RunError, RunRecord, Tracking, now
+from .asset_models import AssetAudit
 
 
 class RunStore:
@@ -88,13 +89,34 @@ class RunStore:
         with self._transaction() as conn:
             return [record for row in conn.execute('SELECT record FROM runs')
                     if (record := self._decode(row)).stage not in
-                    ('prepared', 'draft_ready', 'ready_for_editor', 'failed', 'needs_attention')]
+                    ('prepared', 'draft_ready', 'assets_audited', 'ready_for_editor', 'failed', 'needs_attention')]
+
+    def begin_audit(self, run_id: str, *, expected_version: int) -> RunRecord:
+        with self._edit(run_id, expected_version) as (record, data):
+            if (record.stage not in ('draft_ready', 'auditing_assets', 'assets_audited', 'needs_attention')
+                    or record.requires_reconciliation or record.project.state != 'accepted'
+                    or record.generation.state != 'accepted' or not record.video_id or not record.task_id
+                    or not record.tracking.completion_seen or not record.tracking.draft.ready
+                    or record.tracking.task_status != 'completed'):
+                raise RunError('draft_not_ready')
+            data.update(stage='auditing_assets', asset_audit=AssetAudit(state='running').model_dump())
+        return self.get(run_id)
+
+    def record_audit(self, run_id: str, audit: AssetAudit, *, expected_version: int) -> RunRecord:
+        if not isinstance(audit, AssetAudit) or audit.state not in ('completed', 'needs_attention'):
+            raise RunError('invalid_audit', 422)
+        with self._edit(run_id, expected_version) as (record, data):
+            if record.stage != 'auditing_assets' or record.asset_audit.state != 'running':
+                raise RunError('invalid_stage')
+            data.update(stage='assets_audited' if audit.state == 'completed' else 'needs_attention',
+                        asset_audit=audit.model_dump())
+        return self.get(run_id)
 
     def track(self, run_id: str, tracking: Tracking, *, stage: str, expected_version: int) -> RunRecord:
         if stage not in ('prepared', 'project_created', 'generating', 'checking_draft', 'draft_ready', 'needs_attention', 'failed'):
             raise RunError('invalid_stage')
         with self._edit(run_id, expected_version) as (record, data):
-            if record.stage in ('draft_ready', 'ready_for_editor', 'failed'):
+            if record.stage in ('draft_ready', 'auditing_assets', 'assets_audited', 'ready_for_editor', 'failed'):
                 raise RunError('invalid_stage')
             if stage == 'prepared' and (record.project.state != 'not_sent' or record.generation.state != 'not_sent'):
                 raise RunError('invalid_stage')
