@@ -7,11 +7,32 @@ from ..tracking import task_event
 from .models import PublishEvent, StageVerification
 
 
+def _initialization_flags(body, video_id, task_id):
+    """Inspect the same envelopes/scope as task_event, without changing draft tracking."""
+    if not isinstance(body, dict) or task_event(body, video_id, task_id) is None:
+        return []
+    kwargs = body.get('additional_kwargs')
+    if isinstance(kwargs, dict) and kwargs.get('taskid') == task_id:
+        return ['task_status' not in kwargs and type(kwargs.get('progress')) in (int, float)
+                and kwargs['progress'] == 0 and not kwargs.get('error')]
+    flags = []
+    for key in ('messages', 'message', 'data'):
+        nested = body.get(key)
+        for item in nested if isinstance(nested, list) else [nested]:
+            flags.extend(_initialization_flags(item, video_id, task_id))
+    return flags
+
+
 def normalize_publish_event(body, video_id, task_id):
     event = task_event(body, video_id, task_id)
     if event is None:
         return None
-    return PublishEvent(task_id=task_id, status=event.status, progress=event.progress,
+    status = event.status
+    if status == 'unrecognized':
+        flags = _initialization_flags(body, video_id, task_id)
+        if flags and all(flags):
+            status = 'initializing'
+    return PublishEvent(task_id=task_id, status=status, progress=event.progress,
                         error_present=event.status == 'failed')
 
 
@@ -74,9 +95,14 @@ def verify_publish_stage(record, history):
         if log is None:
             return StageVerification(status='waiting')
         state = log['state']
-        # Observed during the authorized 2026-11-05 upload. This is explicit
-        # pending evidence only, even if a URL happens to be present already.
-        if record.stage == 'uploading' and state == 'upload_youtube_start':
+        # Observed task-scoped transitions; pending never establishes completion,
+        # even when result fields are already populated.
+        pending = {
+            'rendering': {'start', 'workerstart'},
+            'generating_metadata': {'generate_metainfo_youtube_start', 'info'},
+            'uploading': {'upload_youtube_start'},
+        }
+        if state in pending.get(record.stage, set()):
             return StageVerification(status='waiting')
         # Only observed terminal states are accepted. Unknown in-progress/failure
         # history values cannot establish success or a definite remote failure.

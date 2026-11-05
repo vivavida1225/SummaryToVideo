@@ -1,5 +1,7 @@
 """Real local FastAPI + Edge; synthetic InfoX and clipboard, zero external calls."""
 import asyncio
+import copy
+import json
 import shutil
 import socket
 import tempfile
@@ -26,6 +28,28 @@ def scenario(playwright, root, mode):
             runs,run=pool.submit(verified,project).result()
         fake=PublishClient(fail=mode.removeprefix('failure_') if mode.startswith('failure_') else None,
                            lost='render' if mode=='lost_ack' else None, early=True)
+        if mode=='initialization':
+            observed=json.loads((root/'tests/fixtures/infox_publishing/initialization-2026-11-05.json').read_text(encoding='utf-8'))
+            operation=fake.operation
+            async def initialized(name,task,log):
+                body=copy.deepcopy(observed['initial']); body['additional_kwargs']['taskid']=task
+                await fake.queue.put(body); await asyncio.sleep(.01)
+                return await operation(name,task,log)
+            fake.operation=initialized
+            read_history=fake.render_logs
+            positions={'render':0,'metadata_generate':0}
+            async def pending_history(video_id):
+                result=await read_history(video_id)
+                name=fake.calls[-1] if fake.calls else None
+                if name in positions:
+                    states=observed['render_pending_states'] if name=='render' else observed['metadata_pending_states']
+                    index=positions[name]
+                    if index<len(states):
+                        positions[name]+=1
+                        result['logs'][0 if name=='render' else 1].update(
+                            state=states[index],file_name=None,sns_upload_info=None)
+                return result
+            fake.render_logs=pending_history
         clipboard=PublishClipboard(fail=mode=='clipboard_failure')
         gate=threading.Event()
         original=fake.render_logs
@@ -132,10 +156,10 @@ def scenario(playwright, root, mode):
 def main():
     root=Path(__file__).resolve().parents[1]
     with sync_playwright() as playwright:
-        for mode in ('success','failure_render','failure_metadata_generate','failure_metadata_update','failure_upload',
+        for mode in ('success','initialization','failure_render','failure_metadata_generate','failure_metadata_update','failure_upload',
                      'lost_ack','duplicate','reload','restart','clipboard_failure'):
             scenario(playwright,root,mode)
-    print('PASS: 10 publication browser scenarios; external requests 0.',flush=True)
+    print('PASS: 11 publication browser scenarios; external requests 0.',flush=True)
 
 
 if __name__=='__main__': main()

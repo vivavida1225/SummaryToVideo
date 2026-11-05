@@ -1,0 +1,189 @@
+{
+  "verified_at": "2026-11-05T15:34:53.337263+09:00",
+  "mode": "real_local_gui_single_click_full_automatic_publication",
+  "source_base_commit": "c95c7b1",
+  "project_kind": "dedicated_non_market_verification_video",
+  "job_id": "20261105_153238_418806_e59fd312",
+  "run_id": "c9c08fa40c2144f1bdfd5c22fd924d33",
+  "video_id": "4198bdb5-8abf-40e3-9376-428250e8403f",
+  "publication_id": "31041ce0e18f4bdea8991968ba797e49",
+  "stage": "completed",
+  "market_date": "2026-11-04",
+  "title": "261104 AI 영상 시황",
+  "description": "2026년 11월 4일 AI 영상 시황",
+  "render_task_id": "mw366fq9-1xeg1",
+  "metadata_task_id": "mw367eot-amcfd",
+  "upload_task_id": "mw367oau-mmkv3",
+  "receipts": {
+    "render": {
+      "state": "accepted",
+      "intent_at": "2026-11-05T06:33:41.441888+00:00",
+      "acknowledged_at": "2026-11-05T06:33:41.550129+00:00",
+      "response_verified": true,
+      "read_verified": true
+    },
+    "metadata_generate": {
+      "state": "accepted",
+      "intent_at": "2026-11-05T06:34:26.761815+00:00",
+      "acknowledged_at": "2026-11-05T06:34:26.800701+00:00",
+      "response_verified": true,
+      "read_verified": true
+    },
+    "metadata_update": {
+      "state": "accepted",
+      "intent_at": "2026-11-05T06:34:39.055661+00:00",
+      "acknowledged_at": "2026-11-05T06:34:39.125794+00:00",
+      "response_verified": true,
+      "read_verified": true
+    },
+    "upload": {
+      "state": "accepted",
+      "intent_at": "2026-11-05T06:34:39.216391+00:00",
+      "acknowledged_at": "2026-11-05T06:34:39.631432+00:00",
+      "response_verified": true,
+      "read_verified": true
+    }
+  },
+  "operations": {
+    "project": 1,
+    "generation": 1,
+    "render": 1,
+    "metadata_generate": 1,
+    "metadata_update": 1,
+    "upload": 1,
+    "clipboard": 1
+  },
+  "remote_editor_context_writes": 0,
+  "clipboard_readback_verified": true,
+  "uploaded_verified": true,
+  "infox_privacy_status": "unlisted",
+  "share_url": "https://youtu.be/V52QVJ7aDPc",
+  "keywords_preserved_count": 10,
+  "initial_render_event": {
+    "task_id": "mw366fq9-1xeg1",
+    "status": "initializing",
+    "progress": 0,
+    "error_present": false,
+    "status_present": false,
+    "raw_status": null
+  },
+  "ui_progress": [
+    {
+      "stage": "rendering",
+      "progress": 0
+    },
+    {
+      "stage": "rendering",
+      "progress": 28
+    },
+    {
+      "stage": "rendering",
+      "progress": 37
+    },
+    {
+      "stage": "rendering",
+      "progress": 45
+    },
+    {
+      "stage": "rendering",
+      "progress": 52
+    },
+    {
+      "stage": "rendering",
+      "progress": 60
+    },
+    {
+      "stage": "rendering",
+      "progress": 67
+    },
+    {
+      "stage": "rendering",
+      "progress": 75
+    },
+    {
+      "stage": "rendering",
+      "progress": 83
+    },
+    {
+      "stage": "generating_metadata",
+      "progress": 70
+    },
+    {
+      "stage": "uploading",
+      "progress": 30
+    }
+  ],
+  "stages": [
+    {
+      "time": "2026-11-05T15:33:40.029367+09:00",
+      "stage": "prepared",
+      "progress": null
+    },
+    {
+      "time": "2026-11-05T15:33:41.335498+09:00",
+      "stage": "preflighting",
+      "progress": null
+    },
+    {
+      "time": "2026-11-05T15:33:42.380608+09:00",
+      "stage": "rendering",
+      "progress": 0
+    },
+    {
+      "time": "2026-11-05T15:34:27.276821+09:00",
+      "stage": "generating_metadata",
+      "progress": null
+    },
+    {
+      "time": "2026-11-05T15:34:39.824794+09:00",
+      "stage": "uploading",
+      "progress": null
+    },
+    {
+      "time": "2026-11-05T15:34:48.106228+09:00",
+      "stage": "completed",
+      "progress": 100
+    }
+  ],
+  "render_history_states": [
+    "start",
+    "workerstart",
+    "end"
+  ],
+  "metadata_history_states": [
+    "generate_metainfo_youtube_start",
+    "info",
+    "end"
+  ],
+  "local_publish_posts": 1,
+  "reload_read_only_verified": true,
+  "manual_publication_continuation": false,
+  "browser_errors": [],
+  "unexpected_requests": [],
+  "automated_checks": {
+    "python_tests": 740,
+    "frontend_tests": 103,
+    "build": true,
+    "mock_edge_scenarios": 11,
+    "independent_review_focused_tests": 61,
+    "unresolved_review_findings": 0
+  },
+  "supplementary_contract_probe": {
+    "metadata_task_id": "mw35pz27-3ta9k",
+    "metadata_generate_requests": 1,
+    "render_requests": 0,
+    "upload_requests": 0,
+    "history_states": [
+      "generate_metainfo_youtube_start",
+      "info",
+      "end"
+    ]
+  },
+  "safe_diagnostics": "Only task IDs, status presence/value, finite progress and safe result flags retained; credentials, media URLs and raw responses omitted.",
+  "remaining_limits": [
+    "YouTube direct current privacy/playback unverified",
+    "Actual failure paths covered by mocks, not intentionally triggered live",
+    "No atomic remote editor lock after last version check",
+    "Unobserved states still stop; no retries/rerenders/reuploads added"
+  ]
+}

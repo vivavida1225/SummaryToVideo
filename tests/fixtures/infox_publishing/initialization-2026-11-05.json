@@ -1,0 +1,21 @@
+{
+  "provenance": "Observed 2026-11-05: render mw34e1ji-ssp5w and metadata mw35pz27-3ta9k. Minimal projections; task IDs and error-null substituted. Full sensitive payloads not retained.",
+  "initial": {
+    "additional_kwargs": {
+      "taskid": "render-task",
+      "progress": 0,
+      "error": null
+    }
+  },
+  "render_pending_states": [
+    "start",
+    "workerstart"
+  ],
+  "metadata_pending_states": [
+    "generate_metainfo_youtube_start",
+    "info"
+  ],
+  "render_final_state": "end",
+  "metadata_final_state": "end",
+  "initial_before_ack_ms": 8.628
+}

@@ -86,7 +86,7 @@ class PublicationRecord(StrictModel):
 
 class PublishEvent(StrictModel):
     task_id: str
-    status: Literal['running', 'completed', 'failed', 'unrecognized']
+    status: Literal['initializing', 'running', 'completed', 'failed', 'unrecognized']
     progress: int | None = None
     error_present: bool = False
 
