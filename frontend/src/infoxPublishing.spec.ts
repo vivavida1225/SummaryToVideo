@@ -3,7 +3,7 @@ import { PublishingControl, formatPublishMetadata, seoulToday } from './infoxPub
 import type { PublicationRecord } from './types'
 
 export function publication(overrides: Partial<PublicationRecord> = {}): PublicationRecord {
-  return { id:'pub-1', run_id:'run-1', video_id:'video-1', version:0, stage:'rendering', failed_stage:null,
+  return { id:'pub-1', run_id:'run-1', video_id:'video-1', attempt_number:1,previous_publication_id:null,created_at:'2026-11-04T00:00:00Z',version:0, stage:'rendering', failed_stage:null,
     error_code:null, progress:42, snapshot:{market_date:'2026-11-04', title:'261104 AI 영상 시황',
     description:'2026년 11월 4일 AI 영상 시황', privacy_status:'unlisted'}, uploaded_verified:false,
     share_url:null, youtube_video_id:null, clipboard_state:'not_started', ...overrides }
@@ -11,10 +11,12 @@ export function publication(overrides: Partial<PublicationRecord> = {}): Publica
 function setup() {
   const port = {
     latestInfoxPublication:vi.fn().mockResolvedValue({publication:null}),
+    infoxPublicationHistory:vi.fn().mockResolvedValue({publications:[]}),
+    rerenderInfoxPublication:vi.fn().mockResolvedValue(publication({id:'pub-2',attempt_number:2,previous_publication_id:'pub-1'})),
     startInfoxPublication:vi.fn().mockResolvedValue(publication()),
     infoxPublication:vi.fn().mockResolvedValue(publication({stage:'completed'})),
     copyInfoxPublicationLink:vi.fn().mockResolvedValue(publication({stage:'completed'})),
-    infoxPublicationPreview:vi.fn().mockResolvedValue({available:true,charged:true}),
+    infoxPublicationPreview:vi.fn().mockResolvedValue({available:true,charged:true,can_start:true,blocked_reason:null,latest_publication_id:null,has_remote_render:false}),
   }
   return {port, control:new PublishingControl(port,'2026-11-04')}
 }
@@ -74,5 +76,69 @@ it('lost_local_post_response_is_recovered_by_get_without_second_post',async () =
   await control.start(); await control.start()
   expect(port.startInfoxPublication).toHaveBeenCalledTimes(1)
   expect(control.record.value?.stage).toBe('needs_attention')
+  control.dispose()
+})
+
+it('prepares_a_new_attempt_with_the_previous_date_and_only_posts_on_start',async()=>{
+  const {port,control}=setup()
+  const old=publication({stage:'completed'})
+  port.latestInfoxPublication.mockResolvedValue({publication:old} as never)
+  port.infoxPublicationHistory.mockResolvedValue({publications:[old]} as never)
+  port.infoxPublicationPreview.mockResolvedValue({available:true,charged:false,can_start:true,blocked_reason:null,latest_publication_id:old.id,has_remote_render:true})
+  await control.restore('run-1')
+  expect(control.canStart.value).toBe(false)
+  await control.prepareNew()
+  expect(control.marketDate.value).toBe('2026-11-04')
+  expect(port.rerenderInfoxPublication).not.toHaveBeenCalled()
+  control.marketDate.value='2026-11-03'
+  await Promise.all([control.start(),control.start()])
+  expect(port.rerenderInfoxPublication).toHaveBeenCalledTimes(1)
+  expect(port.rerenderInfoxPublication.mock.calls[0]![1]).toMatchObject({market_date:'2026-11-03',previous_publication_id:'pub-1'})
+  expect(port.startInfoxPublication).not.toHaveBeenCalled()
+  expect(control.history.value.map(r=>r.id)).toEqual(['pub-2','pub-1'])
+  control.dispose()
+})
+
+it('cancelled_preparation_cannot_be_reenabled_by_a_late_preview',async()=>{
+  const {port,control}=setup()
+  port.latestInfoxPublication.mockResolvedValue({publication:publication({stage:'completed'})} as never)
+  await control.restore('run-1')
+  let finish!:(x:unknown)=>void
+  port.infoxPublicationPreview.mockImplementation(()=>new Promise(r=>{finish=r}) as never)
+  const pending=control.prepareNew()
+  await vi.waitFor(()=>expect(port.infoxPublicationPreview).toHaveBeenCalled())
+  control.cancelPreparation()
+  finish({available:true,charged:false,can_start:true,latest_publication_id:'pub-1'})
+  await pending
+  expect(control.preparing.value).toBe(false)
+  expect(control.canStart.value).toBe(false)
+  control.dispose()
+})
+
+it('lost_rerender_response_does_not_unlock_the_old_record_or_repost',async()=>{
+  const {port,control}=setup()
+  port.latestInfoxPublication.mockResolvedValue({publication:publication({stage:'failed'})} as never)
+  port.infoxPublicationPreview.mockResolvedValue({available:true,charged:false,can_start:true,blocked_reason:null,latest_publication_id:'pub-1',has_remote_render:true})
+  await control.restore('run-1');await control.prepareNew()
+  port.rerenderInfoxPublication.mockRejectedValue(new Error('lost'))
+  await control.start();await control.start()
+  expect(control.uncertain.value).toBe(true)
+  expect(control.canPrepare.value).toBe(false)
+  expect(port.rerenderInfoxPublication).toHaveBeenCalledTimes(1)
+  control.dispose()
+})
+
+it('a_late_preparation_preview_cannot_override_lost_editor_eligibility',async()=>{
+  const {port,control}=setup()
+  port.latestInfoxPublication.mockResolvedValue({publication:publication({stage:'completed'})} as never)
+  await control.restore('run-1')
+  let finish!:(x:unknown)=>void
+  port.infoxPublicationPreview.mockImplementation(()=>new Promise(r=>{finish=r}) as never)
+  const pending=control.prepareNew()
+  await vi.waitFor(()=>expect(port.infoxPublicationPreview).toHaveBeenCalled())
+  await control.setEligibility(false)
+  finish({available:true,charged:false,can_start:true,latest_publication_id:'pub-1'})
+  await pending
+  expect(control.canStart.value).toBe(false)
   control.dispose()
 })

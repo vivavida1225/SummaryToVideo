@@ -22,7 +22,7 @@ from .infox.manager import RunManager
 from .infox.client import InfoXClient
 from .infox.config import InfoXCredentials
 from .infox.editor import EditorClaim, EditorUpdate
-from .infox.publishing.models import PublishInput, PublishTimeouts
+from .infox.publishing.models import PublishInput, RerenderInput, PublishTimeouts
 from .infox.publishing.store import PublicationStore
 from .infox.publishing.manager import PublicationManager
 from .models import MODELS, model_candidates
@@ -272,6 +272,14 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
     @app.post('/api/infox-runs/{run_id}/publications', status_code=202)
     async def start_infox_publication(run_id: str, data: PublishInput):
         return await infox_publications.start(run_id, data)
+
+    @app.post('/api/infox-runs/{run_id}/publications/rerender', status_code=202)
+    async def rerender_infox_publication(run_id: str, data: RerenderInput):
+        return await infox_publications.start(run_id, data)
+
+    @app.get('/api/infox-runs/{run_id}/publications/history')
+    async def infox_publication_history(run_id: str):
+        return {'publications': infox_publications.store.history(run_id)}
 
     @app.get('/api/infox-runs/{run_id}/publications')
     async def latest_infox_publication(run_id: str):

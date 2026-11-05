@@ -5,7 +5,8 @@ from uuid import uuid4
 
 from ..editor import editor_ready
 from ..run_models import RunError, now
-from .models import TERMINAL, PublicationRecord, PublishSnapshot, PublishReceipt, format_publish_metadata
+from .models import TERMINAL, PublicationRecord, PublishSnapshot, PublishReceipt, RerenderInput, format_publish_metadata
+from .migration import create_publications, migrate_publications
 
 OPERATIONS = {
     'render': ('starting_render', 'render_task_id'),
@@ -18,11 +19,12 @@ OPERATIONS = {
 class PublicationStore:
     def __init__(self, run_store):
         self.run_store = run_store
+        migrate_publications(run_store.root)
 
     @staticmethod
     def _tables(conn):
-        conn.execute('CREATE TABLE IF NOT EXISTS publications (id TEXT PRIMARY KEY, run_id TEXT NOT NULL UNIQUE '
-                     'REFERENCES runs(id), video_id TEXT NOT NULL UNIQUE, record TEXT NOT NULL)')
+        create_publications(conn)
+        conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS publications_one_active ON publications(video_id) WHERE active=1')
         conn.execute('CREATE TABLE IF NOT EXISTS publication_intents (intent_id TEXT PRIMARY KEY, digest TEXT NOT NULL, '
                      'publication_id TEXT NOT NULL REFERENCES publications(id))')
 
@@ -36,7 +38,10 @@ class PublicationStore:
             raise RunError('invalid_record', 503) from None
 
     def create_or_get(self, run_id, input):
-        digest = hashlib.sha256(json.dumps([run_id, input.market_date]).encode()).hexdigest()
+        parts = [run_id, input.market_date]
+        if isinstance(input, RerenderInput):
+            parts.append(input.previous_publication_id)
+        digest = hashlib.sha256(json.dumps(parts).encode()).hexdigest()
         self.run_store._run_id(run_id)
         with self.run_store._transaction() as conn:
             self._tables(conn)
@@ -47,22 +52,30 @@ class PublicationStore:
                     raise RunError('intent_conflict')
                 return self._decode(row), False
             run = self.run_store._decode(conn.execute('SELECT record FROM runs WHERE id=?', (run_id,)).fetchone())
-            row = conn.execute('SELECT record FROM publications WHERE run_id=? OR video_id=?',
-                               (run_id, run.video_id)).fetchone()
-            if row:
-                record = self._decode(row)
-                if record.run_id != run_id:
-                    raise RunError('publication_exists')
+            row = conn.execute('SELECT record FROM publications WHERE video_id=? ORDER BY attempt_number DESC LIMIT 1',
+                               (run.video_id,)).fetchone()
+            previous = self._decode(row) if row else None
+            if isinstance(input, RerenderInput):
+                if not previous or input.previous_publication_id != previous.id:
+                    raise RunError('publication_changed')
+                if previous.stage not in TERMINAL or conn.execute(
+                        'SELECT 1 FROM publications WHERE video_id=? AND active=1', (run.video_id,)).fetchone():
+                    raise RunError('publication_active')
+            if previous and not isinstance(input, RerenderInput):
+                record = previous
                 created = False
             else:
                 if not editor_ready(run):
                     raise RunError('editor_not_ready')
                 title, description = format_publish_metadata(date.fromisoformat(input.market_date))
                 record = PublicationRecord(id=uuid4().hex, run_id=run_id, video_id=run.video_id,
+                    attempt_number=previous.attempt_number + 1 if previous else 1,
+                    previous_publication_id=previous.id if previous else None,
                     snapshot=PublishSnapshot(market_date=input.market_date, title=title, description=description),
                     created_at=now(), updated_at=now())
-                conn.execute('INSERT INTO publications VALUES (?,?,?,?)',
-                             (record.id, run_id, run.video_id, record.model_dump_json()))
+                conn.execute('INSERT INTO publications VALUES (?,?,?,?,?,?,?)',
+                             (record.id, run_id, run.video_id, record.model_dump_json(),
+                              record.attempt_number, record.previous_publication_id, 1))
                 created = True
             conn.execute('INSERT INTO publication_intents VALUES (?,?,?)', (input.intent_id, digest, record.id))
             return record, created
@@ -73,11 +86,15 @@ class PublicationStore:
             return self._decode(conn.execute('SELECT record FROM publications WHERE id=?', (id,)).fetchone())
 
     def for_run(self, run_id):
-        self.run_store.get(run_id)
+        history = self.history(run_id)
+        return history[0] if history else None
+
+    def history(self, run_id):
+        run = self.run_store.get(run_id)
         with self.run_store._transaction() as conn:
             self._tables(conn)
-            row = conn.execute('SELECT record FROM publications WHERE run_id=?', (run_id,)).fetchone()
-            return self._decode(row) if row else None
+            return [self._decode(row) for row in conn.execute(
+                'SELECT record FROM publications WHERE video_id=? ORDER BY attempt_number DESC', (run.video_id,))]
 
     def all(self):
         with self.run_store._transaction() as conn:
@@ -97,11 +114,15 @@ class PublicationStore:
                                and changes.get('clipboard_state') == 'intent_recorded')
                 if not manual_copy:
                     raise RunError('record_conflict')
-            if set(changes) & {'id', 'run_id', 'video_id', 'version', 'created_at'}:
+            if set(changes) & {'id', 'run_id', 'video_id', 'version', 'created_at', 'attempt_number', 'previous_publication_id'}:
                 raise RunError('invalid_operation')
             updated = PublicationRecord.model_validate({**r.model_dump(), **changes,
                 'version': r.version + 1, 'updated_at': now()})
-            conn.execute('UPDATE publications SET record=? WHERE id=?', (updated.model_dump_json(), id))
+            active = int(updated.stage not in TERMINAL)
+            if active and conn.execute('SELECT 1 FROM publications WHERE video_id=? AND active=1 AND id!=?',
+                                       (r.video_id, id)).fetchone():
+                raise RunError('publication_active')
+            conn.execute('UPDATE publications SET record=?,active=? WHERE id=?', (updated.model_dump_json(), active, id))
             return updated
 
     def transition(self, id, expected_version, changes):

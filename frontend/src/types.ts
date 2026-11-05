@@ -136,6 +136,9 @@ export interface PublicationRecord {
   id: string
   run_id: string
   video_id: string
+  attempt_number: number
+  previous_publication_id: string | null
+  created_at: string
   version: number
   stage: string
   failed_stage: string | null
@@ -148,7 +151,11 @@ export interface PublicationRecord {
   clipboard_state: string
 }
 export interface PublishInput { intent_id: string; market_date: string }
-export interface PublishCharge { available: boolean; charged: boolean | null; credits?: number; duration_seconds?: number }
+export interface RerenderInput extends PublishInput { previous_publication_id: string }
+export interface PublishCharge {
+  available: boolean; charged: boolean | null; credits?: number; duration_seconds?: number
+  can_start: boolean; blocked_reason: string | null; latest_publication_id: string | null; has_remote_render: boolean
+}
 
 export interface InfoXReplacementPlan {
   state: string

@@ -1,5 +1,5 @@
 import type { EditorAttempt, InfoXPrepareInput, InfoXRun, Job, MyassetSource, SessionInfo, SourceFile } from './types'
-import type { PublicationRecord, PublishInput, PublishCharge } from './types'
+import type { PublicationRecord, PublishInput, RerenderInput, PublishCharge } from './types'
 
 interface ApiErrorBody {
   detail?: string
@@ -52,6 +52,12 @@ export const api = {
   },
   latestInfoxPublication(runId: string): Promise<{ publication: PublicationRecord | null }> {
     return request(`/api/infox-runs/${encodeURIComponent(runId)}/publications`)
+  },
+  rerenderInfoxPublication(runId: string, input: RerenderInput): Promise<PublicationRecord> {
+    return request(`/api/infox-runs/${encodeURIComponent(runId)}/publications/rerender`, { method:'POST', body:JSON.stringify(input) })
+  },
+  infoxPublicationHistory(runId: string): Promise<{ publications: PublicationRecord[] }> {
+    return request(`/api/infox-runs/${encodeURIComponent(runId)}/publications/history`)
   },
   infoxPublication(id: string): Promise<PublicationRecord> {
     return request(`/api/infox-publications/${encodeURIComponent(id)}`)

@@ -27,7 +27,8 @@ def test_reload_get_is_read_only_and_duplicate_post_returns_existing_publication
         c.app.state.infox_publications.clipboard=PublishClipboard()
         headers=auth(c); path=f'/api/infox-runs/{run.id}/publications'
         preview=c.get(path+'/preview',headers=headers)
-        assert preview.status_code==200 and preview.json()=={'available':True,'charged':True}
+        assert preview.status_code==200 and preview.json()=={'available':True,'charged':True,
+            'can_start':True,'blocked_reason':None,'latest_publication_id':None,'has_remote_render':False}
         body={'intent_id':str(uuid4()),'market_date':'2026-11-04'}
         first=c.post(path,headers=headers,json=body)
         assert first.status_code==202, first.text
@@ -60,3 +61,32 @@ def test_restart_keeps_receipts_and_no_writes(tmp_path):
         assert result['stage']=='needs_attention'
         assert result['receipts']['render']['state']=='intent_recorded'
         assert result['error_code']=='server_restarted'
+
+
+def test_rerender_api_is_guarded_and_history_keeps_both_attempts(tmp_path):
+    from tests.test_infox_publishing_store import setup_publication
+    store,first=setup_publication(tmp_path)
+    first=store.transition(first.id,first.version,{'stage':'failed'})
+    with client(tmp_path) as c:
+        fake=PublishClient(suffix='-2')
+        c.app.state.infox_publications.client_factory=lambda:fake
+        c.app.state.infox_publications.clipboard=PublishClipboard()
+        headers=auth(c);path=f'/api/infox-runs/{first.run_id}/publications'
+        body={'intent_id':str(uuid4()),'market_date':'2026-11-04','previous_publication_id':first.id}
+        assert c.post(path+'/rerender',json=body).status_code==403
+        assert c.post(path+'/rerender',headers=headers,json={**body,'video_id':'wrong'}).status_code==422
+        response=c.post(path+'/rerender',headers=headers,json=body)
+        assert response.status_code==202,response.text
+        second=response.json()
+        assert second['attempt_number']==2
+        for _ in range(100):
+            result=c.get(f"/api/infox-publications/{second['id']}",headers=headers).json()
+            if result['stage'] in ('completed','failed','needs_attention'): break
+            time.sleep(.01)
+        assert result['stage']=='completed',result
+        assert c.post(path+'/rerender',headers=headers,json=body).json()['id']==second['id']
+        assert c.post(path+'/rerender',headers=headers,json={**body,'intent_id':str(uuid4())}).status_code==409
+        history=c.get(path+'/history',headers=headers).json()['publications']
+        assert [r['id'] for r in history]==[second['id'],first.id]
+        assert c.get(path,headers=headers).json()['publication']['id']==second['id']
+        assert fake.calls==['render','metadata_generate','metadata_update','upload']

@@ -1,0 +1,20 @@
+{
+  "provenance": "Observed 2026-11-05 API rerender and follow-up upload. Task IDs, media references, text and keywords are explicit identity-preserving substitutes. No raw payloads or credentials.",
+  "render_response": {"message": "render", "taskid": "render-new", "is_rerender": true, "charged": false, "credits": 0},
+  "render_history_states": ["start", "workerstart", "end"],
+  "metadata_history_states": ["generate_metainfo_youtube_start", "info", "end"],
+  "upload_history_states": ["upload_youtube_start", "sns"],
+  "metadata_input_render_task_id": "render-new",
+  "upload_input_metadata_task_id": "metadata-new",
+  "baseline": {"logs": [
+    {"task_id": "draft-old", "state": "videosgenerationend"},
+    {"task_id": "cancel-old", "state": "cancel", "updated_at": "2026-11-05T06:44:08Z"},
+    {"task_id": "render-old", "state": "end", "bucket": "fixture-render", "file_name": "old.mp4", "updated_at": "2026-11-05T06:47:51Z"},
+    {"task_id": "upload-old", "state": "sns", "sns_url": "https://youtu.be/abcdefghijk"}
+  ]},
+  "history": {"logs": [
+    {"task_id": "render-new", "state": "end", "bucket": "fixture-render", "file_name": "rerender.mp4"},
+    {"task_id": "metadata-new", "state": "end", "bucket": "fixture-render", "file_name": "rerender.mp4", "sns_upload_info": {"title": "261104 AI 영상 시황", "description": "2026년 11월 4일 AI 영상 시황", "keywords": ["keep", "키워드"], "privacyStatus": "unlisted"}},
+    {"task_id": "upload-new", "state": "sns", "sns_url": "https://youtu.be/ZYXWVUTSRQP"}
+  ]}
+}

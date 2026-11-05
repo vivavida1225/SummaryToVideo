@@ -14,7 +14,8 @@ Operation = Literal['render', 'metadata_generate', 'metadata_update', 'upload']
 ErrorCode = Literal['preflight_unconfirmed', 'existing_publication', 'remote_changed', 'stream_unavailable',
     'stream_overflow', 'stream_unrecognized', 'remote_task_failed', 'history_unrecognized',
     'stage_timeout', 'acceptance_unknown', 'authentication_required', 'internal_error',
-    'server_restarted', 'clipboard_error', 'invalid_share_url', 'metadata_mismatch']
+    'server_restarted', 'clipboard_error', 'invalid_share_url', 'metadata_mismatch',
+    'publication_active', 'previous_unconfirmed']
 
 
 class PublishInput(StrictModel):
@@ -32,6 +33,10 @@ class PublishInput(StrictModel):
         if date.fromisoformat(value).isoformat() != value:
             raise ValueError('invalid date')
         return value
+
+
+class RerenderInput(PublishInput):
+    previous_publication_id: str = Field(pattern=r'^[0-9a-f]{32}$')
 
 
 def format_publish_metadata(market_date: date) -> tuple[str, str]:
@@ -64,6 +69,8 @@ class PublicationRecord(StrictModel):
     id: str = Field(pattern=r'^[0-9a-f]{32}$')
     run_id: str = Field(pattern=r'^[0-9a-f]{32}$')
     video_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,128}$')
+    attempt_number: int = Field(default=1, ge=1)
+    previous_publication_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
     version: int = Field(default=0, ge=0)
     stage: PublishStage = 'prepared'
     failed_stage: PublishStage | None = None

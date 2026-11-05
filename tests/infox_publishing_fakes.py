@@ -8,7 +8,8 @@ from backend.infox.sse import SSEEvent
 
 class PublishClient:
     """External boundary double: no authentication, network, or OS clipboard."""
-    def __init__(self, *, fail=None, lost=None, changed=False, early=False, no_stream=False):
+    def __init__(self, *, fail=None, lost=None, changed=False, early=False, no_stream=False, suffix=''):
+        self.suffix = suffix
         self.calls = []
         self.logs = []
         self.queue = asyncio.Queue()
@@ -43,21 +44,25 @@ class PublishClient:
         await asyncio.sleep(0)
         return task
     async def start_render(self, video_id):
-        return await self.operation('render','render-task',{'task_id':'render-task','state':'end','file_name':'movie.mp4','bucket':'render'})
+        task='render-task'+self.suffix
+        return await self.operation('render',task,{'task_id':task,'state':'end','file_name':f'movie{self.suffix}.mp4','bucket':'render'})
     async def generate_youtube_metadata(self, video_id, render_task_id):
-        assert render_task_id == 'render-task'
-        return await self.operation('metadata_generate','metadata-task',{'task_id':'metadata-task','state':'end','file_name':'movie.mp4','bucket':'render',
+        assert render_task_id == 'render-task'+self.suffix
+        task='metadata-task'+self.suffix
+        return await self.operation('metadata_generate',task,{'task_id':task,'state':'end','file_name':f'movie{self.suffix}.mp4','bucket':'render',
             'sns_upload_info':{'title':'generated','description':'generated','keywords':['keep','키워드']}})
     async def update_youtube_metadata(self, video_id, metadata_task_id, **kwargs):
-        assert metadata_task_id == 'metadata-task' and kwargs['keywords']==['keep','키워드']
+        assert metadata_task_id == 'metadata-task'+self.suffix and kwargs['keywords']==['keep','키워드']
         await self.operation('metadata_update',metadata_task_id,None)
         if self.fail == 'metadata_update': raise InfoXError('invalid_response')
         self.logs[-1]['sns_upload_info'].update(kwargs)
         return {}
     async def upload_youtube(self, video_id, metadata_task_id):
-        assert metadata_task_id == 'metadata-task'
+        assert metadata_task_id == 'metadata-task'+self.suffix
         self.logs[-1]['sns_upload_info']['privacyStatus']=self.privacy
-        return await self.operation('upload','upload-task',{'task_id':'upload-task','state':'sns','sns_url':'https://www.youtube.com/watch?v=abcdefghijk'})
+        task='upload-task'+self.suffix
+        url='https://youtu.be/ZYXWVUTSRQP' if self.suffix else 'https://www.youtube.com/watch?v=abcdefghijk'
+        return await self.operation('upload',task,{'task_id':task,'state':'sns','sns_url':url})
 
 
 class PublishClipboard:

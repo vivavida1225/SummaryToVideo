@@ -88,13 +88,16 @@ def scenario(playwright, root, mode):
                 req=reqroute.request
                 if not req.url.startswith(url):
                     unexpected.append(req.url); reqroute.abort(); return
-                if req.method=='POST' and req.url.endswith('/publications'): posts.append(req.url)
+                if req.method=='POST' and req.url.endswith(('/publications','/publications/rerender')):
+                    posts.append(req.url)
+                    if mode=='rerender_lost_response' and req.url.endswith('/rerender'):
+                        reqroute.fetch(); reqroute.abort(); return
                 reqroute.continue_()
             context.route('**/*',route)
             context.add_init_script(f"sessionStorage.setItem('market-compressor.job-id','{run.snapshot.job_id}')")
             page=context.new_page(); page.on('pageerror',lambda error:errors.append(str(error)))
             page.goto(url,wait_until='networkidle')
-            panel=page.get_by_role('region',name='최초 렌더 및 유튜브 업로드')
+            panel=page.get_by_role('region',name='렌더 및 유튜브 업로드',exact=True)
             button=panel.get_by_role('button',name='편집 완료 · 렌더 및 유튜브 업로드',exact=True)
             expect(button).to_be_enabled()
             panel.get_by_label('게시 기준일').fill('2026-11-04')
@@ -132,6 +135,47 @@ def scenario(playwright, root, mode):
                 expect(panel.get_by_text('업로드 완료 · 링크 복사 완료',exact=True)).to_be_visible(timeout=15000)
                 expect(panel.get_by_role('link',name='https://youtu.be/abcdefghijk')).to_be_visible()
                 assert clipboard.values==['https://youtu.be/abcdefghijk']
+            if mode.startswith('rerender'):
+                first_calls=list(fake.calls)
+                next_fake=PublishClient(suffix='-2',early=True)
+                next_fake.logs=copy.deepcopy(fake.logs)
+                fake=next_fake
+                if mode=='rerender_duplicate':
+                    gate.clear()
+                    read=fake.render_logs
+                    async def second_gated(video_id):
+                        if fake.calls:
+                            while not gate.is_set(): await asyncio.sleep(.02)
+                        return await read(video_id)
+                    fake.render_logs=second_gated
+                panel.get_by_role('button',name='새 회차 렌더·업로드 준비',exact=True).click()
+                expect(button).to_be_enabled()
+                expect(panel.get_by_label('게시 기준일')).to_have_value('2026-11-04')
+                panel.get_by_label('게시 기준일').fill('2026-11-03')
+                if mode=='rerender_duplicate':
+                    other=context.new_page();other.goto(url,wait_until='networkidle')
+                    other.get_by_role('button',name='새 회차 렌더·업로드 준비',exact=True).click()
+                    other_button=other.get_by_role('button',name='편집 완료 · 렌더 및 유튜브 업로드',exact=True)
+                    expect(other_button).to_be_enabled()
+                button.click()
+                if mode=='rerender_duplicate':
+                    expect(panel.get_by_role('progressbar')).to_have_attribute('value','42')
+                    other_button.click();expect(other_button).to_be_disabled();gate.set()
+                expect(panel.get_by_role('status')).to_have_text('업로드 완료 · 링크 복사 완료',timeout=15000)
+                expect(panel.get_by_role('link',name='https://youtu.be/ZYXWVUTSRQP')).to_be_visible()
+                expect(panel.get_by_label('게시 기준일')).to_have_value('2026-11-03')
+                panel.get_by_text('이전 게시 회차 (1)',exact=True).click()
+                expect(panel.get_by_role('link',name='https://youtu.be/abcdefghijk')).to_be_visible()
+                assert first_calls==fake.calls==['render','metadata_generate','metadata_update','upload']
+                assert clipboard.values==['https://youtu.be/abcdefghijk','https://youtu.be/ZYXWVUTSRQP']
+                before=list(fake.calls);copies=list(clipboard.values);postcount=len(posts)
+                page.reload(wait_until='networkidle')
+                expect(panel.get_by_label('게시 기준일')).to_have_value('2026-11-03')
+                assert fake.calls==before and clipboard.values==copies and len(posts)==postcount
+                assert not unexpected and not errors,(unexpected,errors)
+                images=root/'work/rerender';images.mkdir(parents=True,exist_ok=True)
+                panel.screenshot(path=str(images/f'{mode}.png'))
+                return
             expect(panel.get_by_label('게시 기준일')).to_have_value('2026-11-04')
             expect(panel.get_by_label('게시 기준일')).to_be_disabled()
             expect(button).to_be_disabled()
@@ -157,9 +201,10 @@ def main():
     root=Path(__file__).resolve().parents[1]
     with sync_playwright() as playwright:
         for mode in ('success','initialization','failure_render','failure_metadata_generate','failure_metadata_update','failure_upload',
-                     'lost_ack','duplicate','reload','restart','clipboard_failure'):
+                     'lost_ack','duplicate','reload','restart','clipboard_failure',
+                     'rerender','rerender_duplicate','rerender_lost_response'):
             scenario(playwright,root,mode)
-    print('PASS: 11 publication browser scenarios; external requests 0.',flush=True)
+    print('PASS: 14 publication browser scenarios; external requests 0.',flush=True)
 
 
 if __name__=='__main__': main()

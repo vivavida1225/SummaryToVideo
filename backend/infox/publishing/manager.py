@@ -9,6 +9,7 @@ from ..run_models import RunError
 from ..save_models import remote_version
 from .models import TERMINAL, PublishTimeouts
 from .tracking import history_logs, normalize_publish_event, parse_youtube_share_url, verify_publish_stage
+from .preflight import history_block_reason, previous_block_reason
 
 
 class PublishStop(Exception):
@@ -59,35 +60,52 @@ class PublicationManager:
         run = self.store.run_store.get(run_id)
         if not editor_ready(run):
             raise RunError('editor_not_ready')
-        # Never expose the full charge response or any account fields.
+        latest = self.store.for_run(run_id)
+        context = {'can_start': False, 'blocked_reason': None,
+                   'latest_publication_id': latest.id if latest else None, 'has_remote_render': False}
         try:
             async with self.client_factory() as client:
                 async with asyncio.timeout(self.timeouts.preflight):
+                    _, logs = await self._inspect(client, run, context=context)
+                    context['has_remote_render'] = any(log['state'] != 'videosgenerationend' for log in logs)
                     result = await self._read(client.render_charge_preview(run.video_id))
-            return charge_summary(result)
+            charge = charge_summary(result)
+            return {**charge, **context, 'can_start': charge['available'],
+                    'blocked_reason': None if charge['available'] else 'preflight_unconfirmed'}
+        except PublishStop as error:
+            return {'available': False, 'charged': None, **context, 'blocked_reason': error.code}
         except Exception:
-            return {'available': False, 'charged': None}
+            return {'available': False, 'charged': None, **context, 'blocked_reason': 'preflight_unconfirmed'}
+
+    async def _inspect(self, client, run, ignore_id=None, context=None):
+        state = await self._read(client.video_state(run.video_id))
+        if not isinstance(state, dict) or str(state.get('id')) != run.video_id or state.get('can_edit') is not True:
+            raise PublishStop('preflight_unconfirmed')
+        try:
+            version = remote_version(state.get('updated_at'))
+            history = await self._read(client.render_logs(run.video_id))
+            logs = history_logs(history, run.video_id)
+        except ValueError:
+            raise PublishStop('preflight_unconfirmed') from None
+        if context is not None:
+            context['has_remote_render'] = any(log['state'] != 'videosgenerationend' for log in logs)
+        # Check local acceptance uncertainty even if the remote list looks idle.
+        records = [old for old in self.store.history(run.id) if old.id != ignore_id]
+        reason = previous_block_reason(records, history) or history_block_reason(logs, run.task_id)
+        if reason:
+            raise PublishStop(reason)
+        return version, logs
 
     async def _preflight(self, client, r):
         run = self.store.run_store.get(r.run_id)
         if not editor_ready(run) or run.video_id != r.video_id:
             raise PublishStop('preflight_unconfirmed')
-        state = await self._read(client.video_state(r.video_id))
-        if not isinstance(state, dict) or str(state.get('id')) != r.video_id or state.get('can_edit') is not True:
-            raise PublishStop('preflight_unconfirmed')
-        try:
-            version = remote_version(state.get('updated_at'))
-            logs = history_logs(await self._read(client.render_logs(r.video_id)), r.video_id)
-        except ValueError:
-            raise PublishStop('preflight_unconfirmed') from None
-        # The only observed non-publication history state is draft completion.
-        if any(log['state'] != 'videosgenerationend' or log['task_id'] != run.task_id for log in logs):
-            raise PublishStop('existing_publication')
+        version, logs = await self._inspect(client, run, r.id)
         charge = charge_summary(await self._read(client.render_charge_preview(r.video_id)))
         if not charge['available']:
             raise PublishStop('preflight_unconfirmed')
         return self._transition(r, snapshot={**r.snapshot.model_dump(), 'remote_updated_at': version,
-            'baseline_remote_task_ids': tuple(log['task_id'] for log in logs)})
+            'baseline_remote_task_ids': tuple(sorted(log['task_id'] for log in logs))})
 
     async def _pump(self, client, video_id, queue, connected, health):
         last_id = ''
@@ -213,7 +231,10 @@ class PublicationManager:
                         raise PublishStop('remote_changed')
                     # Re-read history too: another editor may have started rendering.
                     logs = history_logs(await self._read(client.render_logs(r.video_id)), r.video_id)
-                    if tuple(log['task_id'] for log in logs) != r.snapshot.baseline_remote_task_ids:
+                    reason = history_block_reason(logs, self.store.run_store.get(r.run_id).task_id)
+                    if reason:
+                        raise PublishStop(reason)
+                    if tuple(sorted(log['task_id'] for log in logs)) != r.snapshot.baseline_remote_task_ids:
                         raise PublishStop('existing_publication')
                 async with asyncio.timeout(self.timeouts.render):
                     r = self._transition(r, stage='starting_render', progress=None)
