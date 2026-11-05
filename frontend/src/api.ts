@@ -1,4 +1,5 @@
 import type { EditorAttempt, InfoXPrepareInput, InfoXRun, Job, MyassetSource, SessionInfo, SourceFile } from './types'
+import type { PublicationRecord, PublishInput, PublishCharge } from './types'
 
 interface ApiErrorBody {
   detail?: string
@@ -46,6 +47,21 @@ export async function bootstrapSession(): Promise<SessionInfo> {
 }
 
 export const api = {
+  startInfoxPublication(runId: string, input: PublishInput): Promise<PublicationRecord> {
+    return request(`/api/infox-runs/${encodeURIComponent(runId)}/publications`, { method: 'POST', body: JSON.stringify(input) })
+  },
+  latestInfoxPublication(runId: string): Promise<{ publication: PublicationRecord | null }> {
+    return request(`/api/infox-runs/${encodeURIComponent(runId)}/publications`)
+  },
+  infoxPublication(id: string): Promise<PublicationRecord> {
+    return request(`/api/infox-publications/${encodeURIComponent(id)}`)
+  },
+  copyInfoxPublicationLink(id: string): Promise<PublicationRecord> {
+    return request(`/api/infox-publications/${encodeURIComponent(id)}/copy-link`, { method: 'POST', body: '{}' })
+  },
+  infoxPublicationPreview(runId: string): Promise<PublishCharge> {
+    return request(`/api/infox-runs/${encodeURIComponent(runId)}/publications/preview`)
+  },
   latestEditor(id: string): Promise<{ attempt: EditorAttempt | null }> {
     return request(`/api/infox-runs/${encodeURIComponent(id)}/editor-attempts`)
   },

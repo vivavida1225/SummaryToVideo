@@ -1,0 +1,135 @@
+import { computed, ref } from 'vue'
+import type { api } from './api'
+import type { PublicationRecord, PublishCharge } from './types'
+
+const terminal = new Set(['completed', 'failed', 'needs_attention', 'clipboard_failed'])
+export const publishStages: Record<string, string> = {
+  prepared:'게시 준비', preflighting:'최신 저장 상태·최초 게시 조건 확인 중',
+  starting_render:'렌더 요청 중', rendering:'렌더 진행 중', generating_metadata:'유튜브 정보 생성 중',
+  saving_metadata:'제목·설명 저장 및 재조회 검증 중', starting_upload:'일부공개 업로드 요청 중',
+  uploading:'일부공개 업로드 진행 중', copying_link:'업로드 완료 · 링크 복사 중',
+  completed:'업로드 완료 · 링크 복사 완료', failed:'게시 실패', needs_attention:'게시 확인 필요',
+  clipboard_failed:'업로드 완료 · 링크 복사 실패',
+}
+export const publishErrors: Record<string, string> = {
+  preflight_unconfirmed:'대상 영상의 저장 버전·권한·이용량을 확인하지 못했습니다.',
+  existing_publication:'기존 렌더·게시 이력 또는 식별할 수 없는 작업이 있습니다. 최초 게시를 시작하지 않았습니다.',
+  remote_changed:'최초 조회 후 편집 저장 버전이 변경되었습니다. 실행이 중단되었습니다.',
+  stream_unavailable:'진행 채널 연결을 확인하지 못했습니다. 후속 요청을 중단했습니다.',
+  stream_overflow:'진행 이벤트를 모두 확인할 수 없어 중단했습니다.',
+  stream_unrecognized:'현재 작업의 진행 이벤트 형식을 확인하지 못했습니다.',
+  remote_task_failed:'현재 작업의 실패 신호를 받았습니다. 후속 단계를 중단했습니다.',
+  history_unrecognized:'작업별 완료 이력을 확인하지 못했습니다.',
+  metadata_mismatch:'렌더 결과와 유튜브 정보의 연결 또는 일부공개 설정을 확인하지 못했습니다.',
+  stage_timeout:'단계의 제한 시간이 지났습니다. 기존 작업의 결과를 확인해야 합니다.',
+  acceptance_unknown:'요청 접수 여부가 불명확합니다. 같은 요청을 다시 보내지 않습니다.',
+  authentication_required:'InfoX 인증 또는 권한을 확인하세요.',
+  server_restarted:'서버가 재시작되어 자동 진행이 중단되었습니다. 기존 결과를 확인하세요.',
+  clipboard_error:'업로드 결과는 확인되었습니다. 링크 다시 복사를 사용할 수 있습니다.',
+  internal_error:'게시 상태 확인이 중단되었습니다. 기존 기록을 확인하세요.',
+}
+export function seoulToday(now = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(now)
+  return ['year','month','day'].map(key=>parts.find(part=>part.type===key)!.value).join('-')
+}
+export function formatPublishMetadata(day: string) {
+  const parsed = new Date(day+'T00:00:00Z')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0,10)!==day) return null
+  const [year,month,date]=day.split('-')
+  return {title:`${year!.slice(-2)}${month}${date} AI 영상 시황`,
+    description:`${year}년 ${Number(month)}월 ${Number(date)}일 AI 영상 시황`}
+}
+
+type Port = Pick<typeof api, 'startInfoxPublication'|'latestInfoxPublication'|'infoxPublication'|'copyInfoxPublicationLink'|'infoxPublicationPreview'>
+export class PublishingControl {
+  readonly record = ref<PublicationRecord|null>(null)
+  readonly marketDate = ref('')
+  readonly busy = ref(false)
+  readonly loading = ref(false)
+  readonly uncertain = ref(false)
+  readonly error = ref('')
+  readonly charge = ref<PublishCharge|null>(null)
+  readonly canStart = computed(()=>!this.record.value && !this.loading.value && !this.busy.value &&
+    !this.uncertain.value && !!formatPublishMetadata(this.marketDate.value) && this.charge.value?.available===true)
+  private runId: string|null = null
+  private epoch = 0
+  private previewAllowed = false
+  private timer: ReturnType<typeof setTimeout>|undefined
+  constructor(private port: Port, private initialMarketDate = seoulToday()) { this.marketDate.value=initialMarketDate }
+
+  dispose() { this.epoch++; clearTimeout(this.timer); this.runId=null }
+  async restore(id: string, preview = true) {
+    const epoch=++this.epoch
+    clearTimeout(this.timer)
+    this.runId=id; this.previewAllowed=preview; this.loading.value=true; this.record.value=null; this.charge.value=null
+    this.marketDate.value=this.initialMarketDate; this.uncertain.value=false; this.error.value=''; this.busy.value=false
+    try {
+      const result=await this.port.latestInfoxPublication(id)
+      if(epoch!==this.epoch) return
+      this.apply(result.publication)
+      if(!result.publication && this.previewAllowed) {
+        const charge=await this.port.infoxPublicationPreview(id)
+        if(epoch===this.epoch && this.previewAllowed) this.charge.value=charge
+      }
+    } catch { if(epoch===this.epoch) {this.error.value='게시 기록 조회 실패 · 최신 상태를 확인하려면 화면을 새로고침하세요.'; this.uncertain.value=true} }
+    finally {if(epoch===this.epoch) this.loading.value=false}
+  }
+  async setEligibility(eligible: boolean) {
+    this.previewAllowed=eligible
+    if(!eligible) {this.charge.value=null; return}
+    if(!this.runId || this.loading.value || this.record.value || this.uncertain.value) return
+    const epoch=this.epoch
+    this.loading.value=true
+    try {
+      const charge=await this.port.infoxPublicationPreview(this.runId)
+      if(epoch===this.epoch && this.previewAllowed && !this.record.value) this.charge.value=charge
+    } catch {if(epoch===this.epoch) this.error.value='렌더 이용량 조회 실패 · 화면을 새로고침해 확인하세요.'}
+    finally {if(epoch===this.epoch) this.loading.value=false}
+  }
+  private apply(record: PublicationRecord|null) {
+    this.record.value=record
+    if(record) this.marketDate.value=record.snapshot.market_date
+    if(record && !terminal.has(record.stage)) this.schedule()
+  }
+  private schedule() {
+    clearTimeout(this.timer)
+    const epoch=this.epoch
+    this.timer=setTimeout(()=>{void this.poll(epoch)},1000)
+  }
+  private async poll(epoch: number) {
+    const id=this.record.value?.id
+    if(!id || epoch!==this.epoch) return
+    try {
+      const r=await this.port.infoxPublication(id)
+      if(epoch!==this.epoch || r.id!==this.record.value?.id) return
+      this.error.value=''; this.apply(r)
+    } catch { if(epoch===this.epoch) {this.error.value='진행 조회 실패 · 기존 실행을 유지하며 다시 조회합니다.'; this.schedule()} }
+  }
+  async start() {
+    if(!this.canStart.value || !this.runId) return
+    this.busy.value=true; this.uncertain.value=true; this.error.value=''
+    const epoch=this.epoch, id=this.runId
+    try {
+      const r=await this.port.startInfoxPublication(id,{intent_id:crypto.randomUUID(),market_date:this.marketDate.value})
+      if(epoch===this.epoch) this.apply(r)
+    } catch {
+      if(epoch!==this.epoch) return
+      this.error.value='접수 응답을 확인하지 못했습니다. 기존 게시 기록을 조회하며 요청을 다시 보내지 않습니다.'
+      try {
+        const result=await this.port.latestInfoxPublication(id)
+        if(epoch===this.epoch) this.apply(result.publication)
+      } catch { /* Remain uncertain; never automatically replay the POST. */ }
+    } finally {if(epoch===this.epoch) this.busy.value=false}
+  }
+  async copy() {
+    const r=this.record.value
+    if(!r || r.stage!=='clipboard_failed' || this.busy.value) return
+    this.busy.value=true
+    const epoch=this.epoch
+    try {
+      const updated=await this.port.copyInfoxPublicationLink(r.id)
+      if(epoch===this.epoch) {this.error.value=''; this.apply(updated)}
+    } catch {if(epoch===this.epoch) this.error.value='링크 복사 결과를 확인하지 못했습니다. 보관된 업로드 링크를 확인하세요.'}
+    finally {if(epoch===this.epoch) this.busy.value=false}
+  }
+}

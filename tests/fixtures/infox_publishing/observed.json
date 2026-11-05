@@ -1,0 +1,67 @@
+{
+  "provenance": "2026-11-04 authenticated inspection; original HAR unavailable on 2026-11-05; file/bucket replaced with equal placeholders. Not a newly captured execution.",
+  "video_id": "6f730a33-c89a-4797-9378-7ba42d7a2749",
+  "chain": {
+    "render": {
+      "message": "render",
+      "taskid": "mw1r3pcy-10q4c"
+    },
+    "metadata_generate": {
+      "input_task_id": "mw1r3pcy-10q4c",
+      "message": "generate_metainfo_youtube",
+      "taskid": "mw1r7mul-1ly57"
+    },
+    "metadata_update": {
+      "task_id": "mw1r7mul-1ly57"
+    },
+    "upload": {
+      "input_task_id": "mw1r7mul-1ly57",
+      "message": "upload_youtube_video",
+      "taskid": "mw1r8mz7-dsk95"
+    }
+  },
+  "history": {
+    "logs": [
+      {
+        "task_id": "mw1r8mz7-dsk95",
+        "state": "sns",
+        "sns_url": "https://www.youtube.com/watch?v=M5Xzx8AsefY"
+      },
+      {
+        "task_id": "mw1r7mul-1ly57",
+        "state": "end",
+        "file_name": "sanitized-render.mp4",
+        "bucket": "sanitized-render-bucket",
+        "sns_upload_info": {
+          "title": "261104 AI 영상 시황",
+          "description": "2026년 11월 4일 AI 영상 시황",
+          "keywords": [
+            "국내증시",
+            "코스피",
+            "코스닥",
+            "중간선거영향",
+            "업종별변동성",
+            "2차전지",
+            "반도체",
+            "외국인매도",
+            "프로그램매도",
+            "변동성지수",
+            "자금흐름",
+            "투자전략"
+          ],
+          "privacyStatus": "unlisted"
+        }
+      },
+      {
+        "task_id": "mw1r3pcy-10q4c",
+        "state": "end",
+        "file_name": "sanitized-render.mp4",
+        "bucket": "sanitized-render-bucket"
+      },
+      {
+        "task_id": "mw1qvevt-bq7di",
+        "state": "videosgenerationend"
+      }
+    ]
+  }
+}

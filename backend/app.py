@@ -22,6 +22,9 @@ from .infox.manager import RunManager
 from .infox.client import InfoXClient
 from .infox.config import InfoXCredentials
 from .infox.editor import EditorClaim, EditorUpdate
+from .infox.publishing.models import PublishInput, PublishTimeouts
+from .infox.publishing.store import PublicationStore
+from .infox.publishing.manager import PublicationManager
 from .models import MODELS, model_candidates
 from .myasset import MyassetError, fetch_myasset_source
 from .storage import list_sources, source_path
@@ -91,15 +94,21 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
     manager = JobManager(settings, clipboard=clipboard, compressor_factory=compressor_factory)
     infox_runs = RunService(manager, RunStore(settings.root))
     infox_manager = RunManager(infox_runs.store, lambda: InfoXClient(InfoXCredentials.load(settings.root)))
+    publish_timeouts = PublishTimeouts()
+    infox_publications = PublicationManager(PublicationStore(infox_runs.store),
+        lambda: InfoXClient(InfoXCredentials.load(settings.root), timeout=publish_timeouts.read,
+                           connect_timeout=publish_timeouts.connect), manager.clipboard, timeouts=publish_timeouts)
     token = secrets.token_urlsafe(32)
     identity = instance_id or secrets.token_hex(16)
 
     @asynccontextmanager
     async def lifespan(_app):
         await infox_manager.recover()
+        await infox_publications.recover()
         try:
             yield
         finally:
+            await infox_publications.close()
             await infox_manager.close()
             await manager.close()
 
@@ -107,6 +116,7 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
     app.state.manager = manager
     app.state.infox_runs = infox_runs
     app.state.infox_manager = infox_manager
+    app.state.infox_publications = infox_publications
 
     @app.middleware('http')
     async def local_guard(request: Request, call_next):
@@ -150,7 +160,7 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
 
     @app.exception_handler(RequestValidationError)
     async def invalid_request(_request, exc):
-        if '/infox-runs' in _request.url.path:
+        if '/infox-runs' in _request.url.path or '/infox-publications' in _request.url.path:
             return JSONResponse({'detail': '대본 버전, 실행 식별자와 InfoX 설정 형식을 확인하세요.'}, status_code=422)
         if _request.url.path.endswith('/compressed'):
             return JSONResponse({'detail': '대본 문자열과 저장 버전을 확인하세요. 대본은 5 MiB 이하만 지원합니다.'}, status_code=422)
@@ -170,6 +180,11 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
             'empty_script': '비어 있지 않은 대본을 저장한 뒤 확정하세요.',
             'job_not_ready': '대본 생성이 끝난 뒤 전송본을 확정하세요.',
             'run_not_found': 'InfoX 실행 기록을 찾을 수 없습니다.',
+            'publication_not_found': '게시 실행 기록을 찾을 수 없습니다.',
+            'publication_exists': '이 영상의 게시 기록이 이미 있습니다. 기존 기록을 확인하세요.',
+            'editor_not_ready': '영상 저장·검증을 완료한 뒤 실행하세요.',
+            'upload_not_verified': '업로드 완료가 확인된 링크만 복사할 수 있습니다.',
+            'copy_in_progress': '링크 복사 결과를 확인하는 중입니다.',
             'storage_error': 'InfoX 실행 기록을 읽거나 저장하지 못했습니다. 같은 요청으로 다시 확인하세요.',
             'draft_not_ready': '현재 작업의 완료 신호와 장면·음성·자막의 필수 데이터를 확인한 뒤 에셋을 검사할 수 있습니다.',
             'audit_required': '현재 영상의 기업 에셋 검사를 완료한 뒤 교체 계획을 만들 수 있습니다.',
@@ -249,6 +264,26 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
     @app.get('/api/infox-runs/{run_id}')
     async def get_infox_run(run_id: str):
         return infox_view(infox_runs.get(run_id))
+
+    @app.get('/api/infox-runs/{run_id}/publications/preview')
+    async def preview_infox_publication(run_id: str):
+        return await infox_publications.preview(run_id)
+
+    @app.post('/api/infox-runs/{run_id}/publications', status_code=202)
+    async def start_infox_publication(run_id: str, data: PublishInput):
+        return await infox_publications.start(run_id, data)
+
+    @app.get('/api/infox-runs/{run_id}/publications')
+    async def latest_infox_publication(run_id: str):
+        return {'publication': infox_publications.store.for_run(run_id)}
+
+    @app.get('/api/infox-publications/{publication_id}')
+    async def get_infox_publication(publication_id: str):
+        return infox_publications.store.get(publication_id)
+
+    @app.post('/api/infox-publications/{publication_id}/copy-link')
+    async def copy_infox_publication_link(publication_id: str, data: InfoXAuditInput):
+        return await infox_publications.copy_link(publication_id, manual=True)
 
     @app.post('/api/infox-runs/{run_id}/start', status_code=202)
     async def start_infox_run(run_id: str):

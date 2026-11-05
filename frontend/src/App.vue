@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import InfoXPublishing from './components/InfoXPublishing.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { api, ApiError, bootstrapSession } from './api'
@@ -991,6 +992,7 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
               </template>
             </section>
             <p v-if="editorUrl(infoxRun)"><a :href="editorUrl(infoxRun)!" target="_blank" rel="noopener noreferrer">InfoX 편집 화면 수동 열기</a></p>
+            <InfoXPublishing v-if="infoxRun.video_id" :key="infoxRun.id" :run="infoxRun" />
           </div>
         </section>
       </section>

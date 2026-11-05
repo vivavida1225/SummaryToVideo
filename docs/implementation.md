@@ -67,3 +67,7 @@ Approved scope: Vue3/TypeScript/Vite + Python/FastAPI on Windows. Clipboard HTML
 - Save raw/invalid responses and the decoded draft as before. Count the displayed text in Unicode code points excluding CR/LF and explicit scene delimiters; never truncate content.
 - The result panel displays the draft and current count plus upper bound/excess. Show a review notice and explicit regeneration button, retain copy/download, and disable duplicate submissions. No automatic clipboard writes.
 - Regeneration creates a new child job using the stored original source and draft; the parent remains unchanged. New overlength output returns to needs_review, valid output completes, and other invalid output fails without another automatic repair.
+
+## InfoX 최초 게시
+
+기존 시안 상태와 분리한 publications/publication_intents 테이블, 요청 전 의도 CAS, 단계별 task ID 이력 검증, SSE 진행 표시, 서버 재시작 중단, 업로드·클립보드 결과 분리를 추가했습니다. 로컬 API와 Vue 전용 패널은 [최초 게시 안내](infox/first-publish.md)를 따릅니다.

@@ -10,6 +10,7 @@ import ssl
 from datetime import date, datetime
 from typing import AsyncIterator
 from urllib.parse import unquote, urlsplit
+from urllib.parse import urlencode
 
 import httpx
 import truststore
@@ -41,7 +42,7 @@ class InfoXClient:
     def __init__(self, credentials: InfoXCredentials, *, transport: httpx.AsyncBaseTransport | None = None,
                  media_transport: httpx.AsyncBaseTransport | None = None,
                  stream_auth: str = 'cookie', timeout: float = 30, stream_read_timeout: float = 45,
-                 retry_delay: float = 0.25):
+                 retry_delay: float = 0.25, connect_timeout: float = 15):
         if stream_auth not in ('cookie', 'bearer') or min(timeout, stream_read_timeout) <= 0 or retry_delay < 0:
             raise InfoXError('configuration_error')
         self._credentials = credentials
@@ -55,7 +56,7 @@ class InfoXClient:
         self._stream_auth = stream_auth
         self._stream_timeout = httpx.Timeout(timeout, read=stream_read_timeout)
         self._retry_delay = retry_delay
-        self._http = httpx.AsyncClient(base_url=ORIGIN, timeout=timeout, follow_redirects=False,
+        self._http = httpx.AsyncClient(base_url=ORIGIN, timeout=httpx.Timeout(timeout, connect=connect_timeout), follow_redirects=False,
             verify=truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT), transport=transport)
 
     async def __aenter__(self) -> 'InfoXClient':
@@ -189,6 +190,46 @@ class InfoXClient:
 
     async def render_logs(self, video_id: str) -> dict:
         return await self._read('GET', f'/infomaxai/videos/video_render_logs/{_identifier(video_id)}')
+
+    async def render_charge_preview(self, video_id: str) -> dict:
+        return await self._read('GET', f'/infomaxai/worker/render_charge_preview/{_identifier(video_id)}')
+
+    async def _publish_once(self, path: str, message: str) -> str:
+        await self.authenticate()
+        result = await self._json_once('GET', path, expected_status=200)
+        if result.get('message') != message:
+            raise InfoXError('invalid_response')
+        try:
+            return _identifier(result.get('taskid'))
+        except InfoXError:
+            raise InfoXError('invalid_response') from None
+
+    async def start_render(self, video_id: str) -> str:
+        return await self._publish_once(f'/infomaxai/worker/process_rendering/{_identifier(video_id)}', 'render')
+
+    async def generate_youtube_metadata(self, video_id: str, render_task_id: str) -> str:
+        return await self._publish_once('/infomaxai/worker/infox_generate_metainfo_youtube/'
+            f'{_identifier(video_id)}/{_identifier(render_task_id)}', 'generate_metainfo_youtube')
+
+    async def update_youtube_metadata(self, video_id: str, metadata_task_id: str, *,
+                                     title: str, description: str, keywords: list[str]) -> dict:
+        await self.authenticate()
+        result = await self._json_once('PATCH', f'/infomaxai/videos/video_render_logs/{_identifier(video_id)}/sns_upload_info',
+            body={'task_id': _identifier(metadata_task_id), 'title': title, 'description': description, 'keywords': keywords},
+            expected_status=200)
+        # The exact success body was not retained; require HTTP acknowledgement
+        # and a matching history readback before any upload (manager contract).
+        if (result.get('error') or result.get('success') is False or not result
+                or ('taskid' in result and result['taskid'] != metadata_task_id)):
+            raise InfoXError('invalid_response')
+        return {}  # Never return/persist raw remote responses.
+
+    async def upload_youtube(self, video_id: str, metadata_task_id: str) -> str:
+        video_id = _identifier(video_id)
+        query = urlencode({'redirect_url': f'{ORIGIN}/studio/library/videos/{video_id}?chatboxView=script',
+                           'privacy_status': 'unlisted'})
+        return await self._publish_once('/infomaxai/worker/infox_upload_youtube_video/'
+            f'{video_id}/{_identifier(metadata_task_id)}?{query}', 'upload_youtube_video')
 
     async def save_video_context(self, video_id: str, body: dict) -> str:
         """One attempt only. Caller MUST commit the save intent before entering."""

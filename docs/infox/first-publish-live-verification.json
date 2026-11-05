@@ -1,0 +1,172 @@
+{
+  "verification_time": "2026-11-05T14:07:53.890040+09:00",
+  "mode": "real_user_designated_first_publication",
+  "video_id": "fb6b2a24-7acb-4773-b877-ae427bd55b5a",
+  "run_id": "bc4c4553e3a94fdd983218a94fe45c81",
+  "publication_id": "4dd769ec1fbe485fbec7ebf6411339cd",
+  "imported_saved_target": true,
+  "market_date": "2026-11-04",
+  "title": "261104 AI 영상 시황",
+  "description": "2026년 11월 4일 AI 영상 시황",
+  "stage": "needs_attention",
+  "failed_stage": "rendering",
+  "error_code": "stream_unrecognized",
+  "render_task_id": "mw3343f5-7ha02",
+  "metadata_task_id": null,
+  "upload_task_id": null,
+  "operations_this_invocation": {
+    "video_state": 4,
+    "history": 3,
+    "charge_preview": 1,
+    "render": 1
+  },
+  "receipts": {
+    "render": {
+      "state": "accepted",
+      "intent_at": "2026-11-05T05:07:53.347881+00:00",
+      "acknowledged_at": "2026-11-05T05:07:53.426158+00:00",
+      "response_verified": true,
+      "read_verified": false
+    },
+    "metadata_generate": {
+      "state": "not_sent",
+      "intent_at": null,
+      "acknowledged_at": null,
+      "response_verified": false,
+      "read_verified": false
+    },
+    "metadata_update": {
+      "state": "not_sent",
+      "intent_at": null,
+      "acknowledged_at": null,
+      "response_verified": false,
+      "read_verified": false
+    },
+    "upload": {
+      "state": "not_sent",
+      "intent_at": null,
+      "acknowledged_at": null,
+      "response_verified": false,
+      "read_verified": false
+    }
+  },
+  "intermediate_render_progress_received": false,
+  "render_progress_values": [
+    0
+  ],
+  "infox_unlisted_verified": false,
+  "share_url": null,
+  "clipboard_state": "not_started",
+  "clipboard_readback_verified": false,
+  "youtube_direct_privacy_or_playback_verified": false,
+  "live_failure_paths_tested": false,
+  "remote_editor_context_writes": 0,
+  "automated_verification": {
+    "pytest_passed": 724,
+    "frontend_tests_passed": 103,
+    "browser_scenarios_passed": 10,
+    "frontend_build_passed": true
+  },
+  "supplemental_read_only_verification": {
+    "render_task_id": "mw3343f5-7ha02",
+    "state": "end",
+    "file_name_present": true,
+    "bucket_present": true,
+    "intermediate_render_progress_received": true,
+    "progress_values": [
+      22
+    ],
+    "progress_log_items": 0,
+    "remote_mutations": 0
+  },
+  "live_normal_path_completed": false,
+  "initial_unrecognized_event_raw_status_retained": false,
+  "remaining_unverified": [
+    "Automatic full normal path: initial render SSE status not retained/recognized",
+    "Unobserved intermediate history states for render/metadata",
+    "YouTube-side current privacy and playback",
+    "Actual failure paths (covered only by mocks)"
+  ],
+  "authorized_manual_verification": {
+    "publication_id": "4dd769ec1fbe485fbec7ebf6411339cd",
+    "render_task_id": "mw3343f5-7ha02",
+    "receipts": {
+      "metadata_generate": {
+        "state": "accepted",
+        "verified": true,
+        "intent_at": "2026-11-05T05:17:06.847189+00:00",
+        "acknowledged_at": "2026-11-05T05:17:06.920270+00:00"
+      },
+      "metadata_update": {
+        "state": "accepted",
+        "verified": true,
+        "intent_at": "2026-11-05T05:18:01.846150+00:00",
+        "acknowledged_at": "2026-11-05T05:18:02.981813+00:00"
+      },
+      "upload": {
+        "state": "accepted",
+        "verified": true,
+        "intent_at": "2026-11-05T05:18:28.307623+00:00",
+        "acknowledged_at": "2026-11-05T05:18:28.826837+00:00"
+      },
+      "copy": {
+        "state": "accepted",
+        "verified": true,
+        "intent_at": "2026-11-05T05:20:13.583361+00:00",
+        "acknowledged_at": "2026-11-05T05:20:13.621733+00:00"
+      }
+    },
+    "metadata_task_id": "mw33fyj5-wqrch",
+    "upload_task_id": "mw33hpf1-xev3r",
+    "keywords": [
+      "코스피 급락",
+      "코스닥 하락",
+      "빅테크 실적",
+      "삼성전자 하락",
+      "SK하이닉스",
+      "반도체 변동성",
+      "외국인 순매도",
+      "프로그램 매도",
+      "유동성 우려",
+      "원달러 변동",
+      "유가 상승",
+      "암호화폐 급락",
+      "바이낸스 해킹"
+    ],
+    "share_url": "https://youtu.be/NVrF804XtkE",
+    "youtube_video_id": "NVrF804XtkE",
+    "updated_at": "2026-11-05T05:20:13.640652+00:00",
+    "clipboard_readback_verified": true,
+    "observed_events": [],
+    "history_observations": [],
+    "operation_events": {
+      "metadata_generate": [],
+      "metadata_update": [],
+      "upload": [],
+      "copy": []
+    },
+    "automatic_publication_unchanged": true,
+    "approved_scope": "Existing render; remaining operations once each; no render or automatic resume",
+    "completed_at": "2026-11-05T14:20:13+09:00"
+  },
+  "verification_result": "completed_with_authorized_manual_remaining_steps",
+  "actual_operation_counts": {
+    "render": 1,
+    "metadata_generate": 1,
+    "metadata_update": 1,
+    "upload": 1,
+    "clipboard_write": 1,
+    "video_context_save": 0
+  },
+  "verified_result": {
+    "title": "261104 AI 영상 시황",
+    "description": "2026년 11월 4일 AI 영상 시황",
+    "keywords_count": 13,
+    "keywords_preserved": true,
+    "render_file_matches": true,
+    "infox_privacy_status": "unlisted",
+    "share_url": "https://youtu.be/NVrF804XtkE",
+    "clipboard_readback_verified": true
+  },
+  "observed_live_upload_pending_state": "upload_youtube_start"
+}

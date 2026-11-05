@@ -1,0 +1,25 @@
+{
+  "provenance": "Live authorized 2026-11-05, minimal allowlisted evidence; automatic run stopped, remaining steps separately authorized",
+  "video_id": "fb6b2a24-7acb-4773-b877-ae427bd55b5a",
+  "render_task_id": "mw3343f5-7ha02",
+  "metadata_task_id": "mw33fyj5-wqrch",
+  "upload_task_id": "mw33hpf1-xev3r",
+  "upload_pending": {
+    "task_id": "mw33hpf1-xev3r",
+    "state": "upload_youtube_start",
+    "sns_url": null
+  },
+  "upload_complete": {
+    "task_id": "mw33hpf1-xev3r",
+    "state": "sns",
+    "sns_url": "https://youtu.be/NVrF804XtkE"
+  },
+  "read_only_intermediate_event": {
+    "additional_kwargs": {
+      "taskid": "mw3343f5-7ha02",
+      "task_status": "processing",
+      "progress": 22
+    }
+  },
+  "initial_render_raw_status_known": false
+}

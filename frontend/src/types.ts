@@ -132,6 +132,24 @@ export interface EditorAttempt {
   editor_status: string
 }
 
+export interface PublicationRecord {
+  id: string
+  run_id: string
+  video_id: string
+  version: number
+  stage: string
+  failed_stage: string | null
+  error_code: string | null
+  progress: number | null
+  snapshot: { market_date: string; title: string; description: string; privacy_status: 'unlisted' }
+  uploaded_verified: boolean
+  youtube_video_id: string | null
+  share_url: string | null
+  clipboard_state: string
+}
+export interface PublishInput { intent_id: string; market_date: string }
+export interface PublishCharge { available: boolean; charged: boolean | null; credits?: number; duration_seconds?: number }
+
 export interface InfoXReplacementPlan {
   state: string
   error_code?: string | null

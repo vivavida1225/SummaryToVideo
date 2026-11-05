@@ -1,0 +1,17 @@
+{
+  "provenance": "Synthetic UI-code-derived events; never received live",
+  "running": {
+    "additional_kwargs": {
+      "taskid": "render-task",
+      "task_status": "processing",
+      "progress": 42
+    }
+  },
+  "failure": {
+    "additional_kwargs": {
+      "taskid": "render-task",
+      "task_status": "failed",
+      "error": "synthetic"
+    }
+  }
+}
