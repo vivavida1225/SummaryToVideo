@@ -189,7 +189,7 @@ def audit_assets(state: dict, *, template_id: int, run_id: str, video_id: str,
                     continue
                 props = node.get('props')
                 kind = node.get('type', {}).get('resolvedName') if isinstance(node.get('type'), dict) else None
-                if kind == 'TextLayer4':
+                if kind in ('TextLayer3', 'TextLayer4'):
                     continue
                 # Observed vector decoration in template 1786, without a media reference.
                 if kind == 'ShapeLayer' and isinstance(props, dict) and 'shape' in props and not props.get('media') and not props.get('aigeneratable'):

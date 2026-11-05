@@ -141,6 +141,25 @@ def test_unknown_connected_leaf_cannot_hide_beside_a_supported_asset():
     assert audit(s).state == 'needs_attention'
 
 
+@pytest.mark.parametrize('kind', ['TextLayer3', 'TextLayer4'])
+@pytest.mark.parametrize('with_metadata', [False, True])
+def test_text_layers_do_not_block_or_supply_media_metadata(kind, with_metadata):
+    s = state(candidates=[image(title='neutral equipment')] if with_metadata else [])
+    layers = s['video']['scenes'][0]['rootShape']['layers']
+    layers['ROOT']['child'].append('heading')
+    layers['heading'] = {'type': {'resolvedName': kind}, 'child': [], 'parent': 'ROOT',
+        'props': {'text': '삼성 SK', 'aigeneratable': {'auto_select': False}}}
+    before = copy.deepcopy(s)
+
+    report = audit(s)
+
+    assert report.state == 'completed' and not report.issues
+    assert len(report.items) == 1 and report.items[0].layer_id == 'assigned'
+    assert report.items[0].verdict == ('not_detected' if with_metadata else 'unknown')
+    assert not report.items[0].hits
+    assert s == before
+
+
 def test_video_layer_with_residual_image_bundle_is_unresolved():
     s = state()
     s['video']['scenes'][0]['rootShape']['layers']['assigned'] = layer(

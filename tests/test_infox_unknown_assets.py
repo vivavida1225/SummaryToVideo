@@ -83,15 +83,23 @@ def test_automatic_run_replaces_detected_and_preserves_unknown_through_verified_
     asyncio.run(scenario())
 
 
-def test_all_unknown_assets_complete_unchanged_without_save_or_favorite_selection(tmp_path):
+@pytest.mark.parametrize('text_kind', [None, 'TextLayer3', 'TextLayer4'])
+def test_all_unknown_assets_complete_unchanged_without_save_or_favorite_selection(tmp_path, text_kind):
     async def scenario():
         store, r, fake = mixed_run(tmp_path, unknown_only=True)
+        if text_kind:
+            layers = fake.value['video']['scenes'][0]['rootShape']['layers']
+            layers['ROOT']['child'].append('heading')
+            layers['heading'] = {'type': {'resolvedName': text_kind}, 'child': [], 'parent': 'ROOT',
+                'props': {'text': '삼성 SK', 'aigeneratable': {'auto_select': False}}}
+        before = copy.deepcopy(fake.value)
         manager = RunManager(store, lambda:fake)
         await manager.start(r.id); await manager.wait(r.id)
         final = store.get(r.id)
         assert final.asset_audit.state == 'completed' and final.asset_audit.counts()['unknown'] == len(r.snapshot.scenes)
         assert final.replacement_plan.state == 'not_needed'
         assert final.asset_save.state == 'unchanged_verified' and final.asset_save.receipt_state == 'not_sent'
+        assert final.stage == 'ready_for_editor' and fake.value == before
         assert not fake.writes and not final.replacement_plan.selections and not final.favorite_replacements
         await manager.close()
     asyncio.run(scenario())
