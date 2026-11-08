@@ -78,6 +78,51 @@ class SavingClient(PlanningClient):
         return self.value['updated_at']
 
 
+@pytest.mark.parametrize('response_version,read_version,verified', [
+    ('2026-11-02T02:00:00+00:00', '2026-11-02T02:00:00Z', True),
+    ('2026-11-02T02:00:00Z', '2026-11-02T02:00:00+00:00', True),
+    ('2026-11-02T02:00:00.000001+00:00', '2026-11-02T02:00:00Z', False),
+    ('2026-11-02T01:00:00+00:00', '2026-11-02T01:00:00Z', False),
+])
+def test_save_verification_compares_version_instants(tmp_path, response_version, read_version, verified):
+    async def scenario():
+        store, r, fake = await planned(tmp_path)
+        original = fake.save_video_context
+        async def save(*args):
+            await original(*args)
+            fake.value['updated_at'] = read_version
+            return response_version
+        fake.save_video_context = save
+        manager = RunManager(store, lambda: fake)
+        await manager.save(r.id); await manager.wait(r.id)
+        final = store.get(r.id)
+        assert final.asset_save.state == ('saved_verified' if verified else 'needs_attention')
+        assert final.asset_save.error_code == (None if verified else 'verification_failed')
+        assert final.asset_save.response_version == response_version
+        assert final.asset_save.verified_version == (read_version if verified else None)
+        assert bool(final.favorite_replacements) == verified
+        await manager.start(r.id); await manager.wait(r.id)
+        assert len(fake.writes) == 1
+        await manager.close()
+    asyncio.run(scenario())
+
+
+def test_finish_save_rejects_same_source_instant_with_different_utc_spelling(tmp_path):
+    async def scenario():
+        store, r, fake = await planned(tmp_path)
+        r = store.begin_save(r.id, expected_version=r.version)
+        url_fingerprint = url_reference_fingerprint(fake.value)
+        r = store.begin_save_request(r.id, request_version=fake.value['updated_at'],
+                                    result_url_fingerprint=url_fingerprint, expected_version=r.version)
+        r = store.record_save_outcome(r.id, 'unknown', expected_version=r.version)
+        with pytest.raises(RunError, match='verification_required'):
+            store.finish_save(r.id, verified_version='2026-11-02T01:00:00Z',
+                              fingerprint=r.replacement_plan.result_fingerprint,
+                              url_fingerprint=url_fingerprint, expected_version=r.version)
+        assert not store.get(r.id).favorite_replacements and not fake.writes
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize('tamper', [None, 'content', 'caption'])
 def test_generated_text_variations_can_be_saved_but_save_must_preserve_server_text(tmp_path, tamper):
     async def scenario():

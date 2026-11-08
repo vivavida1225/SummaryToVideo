@@ -138,7 +138,7 @@ def test_legacy_conflict_cause_survives_failed_read_recovery(tmp_path):
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize('response', ['accepted', 'late_conflict'])
+@pytest.mark.parametrize('response', ['accepted', 'accepted_offset', 'accepted_mismatch', 'late_conflict'])
 def test_verified_readback_keeps_late_write_result_as_separate_evidence(tmp_path, response):
     async def scenario():
         store, r, fake = await planned(tmp_path)
@@ -148,6 +148,8 @@ def test_verified_readback_keeps_late_write_result_as_separate_evidence(tmp_path
             version = await original(*args)
             applied.set(); await release.wait()
             if response == 'late_conflict': raise InfoXError('http_error', 409)
+            if response == 'accepted_offset': return '2026-11-02T02:00:00+00:00'
+            if response == 'accepted_mismatch': return '2026-11-02T02:00:00.000001+00:00'
             return version
         fake.save_video_context = delayed
         first, second = RunManager(store, lambda: fake), RunManager(RunStore(tmp_path), lambda: fake)
@@ -156,9 +158,12 @@ def test_verified_readback_keeps_late_write_result_as_separate_evidence(tmp_path
         assert store.get(r.id).asset_save.state == 'saved_verified'
         release.set(); await first.wait(r.id)
         save = store.get(r.id).asset_save
-        assert save.state == 'saved_verified'
-        assert save.receipt_state == ('accepted' if response == 'accepted' else 'rejected')
-        assert save.response_version == (fake.value['updated_at'] if response == 'accepted' else None)
+        assert save.state == ('needs_attention' if response == 'accepted_mismatch' else 'saved_verified')
+        assert save.error_code == ('verification_failed' if response == 'accepted_mismatch' else None)
+        assert save.receipt_state == ('rejected' if response == 'late_conflict' else 'accepted')
+        assert save.response_version == {'accepted': '2026-11-02T02:00:00Z',
+            'accepted_offset': '2026-11-02T02:00:00+00:00',
+            'accepted_mismatch': '2026-11-02T02:00:00.000001+00:00', 'late_conflict': None}[response]
         assert save.write_status == (409 if response == 'late_conflict' else None)
         assert save.write_error_code == ('version_conflict' if response == 'late_conflict' else None)
         assert len(fake.writes) == 1

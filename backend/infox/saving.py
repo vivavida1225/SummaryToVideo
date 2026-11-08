@@ -108,7 +108,8 @@ async def _verify_saved(store, client, r, failure=None):
         matches = (fingerprint == r.replacement_plan.result_fingerprint and verify_draft(r, state).ready
                    and url_fingerprint == r.asset_save.result_url_fingerprint
                    and datetime.fromisoformat(version) > datetime.fromisoformat(r.asset_save.request_version)
-                   and (r.asset_save.response_version is None or version == r.asset_save.response_version))
+                   and (r.asset_save.response_version is None
+                        or datetime.fromisoformat(version) == datetime.fromisoformat(r.asset_save.response_version)))
     except (ValueError, TypeError, KeyError, IndexError, PlanError):
         matches = False
     if matches:

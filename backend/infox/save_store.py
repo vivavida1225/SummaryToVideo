@@ -62,7 +62,8 @@ class SaveStoreMixin:
             if outcome == 'accepted' and not response_version:
                 raise RunError('invalid_outcome')
             verified = r.asset_save.state == 'saved_verified'
-            conflicting_ack = verified and outcome == 'accepted' and response_version != r.asset_save.verified_version
+            conflicting_ack = (verified and outcome == 'accepted'
+                               and datetime.fromisoformat(response_version) != datetime.fromisoformat(r.asset_save.verified_version))
             data.update(stage='needs_attention' if conflicting_ack else 'ready_for_editor' if verified else 'verifying_assets',
                         asset_save={**r.asset_save.model_dump(), 'state': 'needs_attention' if conflicting_ack else 'saved_verified' if verified else 'verifying',
                         'receipt_state': outcome, 'response_version': response_version,
@@ -90,9 +91,10 @@ class SaveStoreMixin:
                     or fingerprint != p.result_fingerprint or not p.checks.ready
                     or (unchanged and s.receipt_state != 'not_sent')
                     or (not unchanged and (p.state != 'ready' or s.receipt_state == 'not_sent'
-                                           or verified_version == p.source_version
+                                           or datetime.fromisoformat(verified_version) == datetime.fromisoformat(p.source_version)
                                            or not url_fingerprint or url_fingerprint != s.result_url_fingerprint))
-                    or (s.response_version is not None and s.response_version != verified_version)):
+                    or (s.response_version is not None
+                        and datetime.fromisoformat(s.response_version) != datetime.fromisoformat(verified_version))):
                 raise RunError('verification_required')
             checked = now()
             history = list(r.favorite_replacements)
