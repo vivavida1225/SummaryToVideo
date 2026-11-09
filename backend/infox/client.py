@@ -191,6 +191,83 @@ class InfoXClient:
     async def render_logs(self, video_id: str) -> dict:
         return await self._read('GET', f'/infomaxai/videos/video_render_logs/{_identifier(video_id)}')
 
+    async def get_presigned_download_url(self, bucket: str, key: str, download_filename: str) -> str:
+        """Read endpoint returning a JSON string, unlike the ordinary object APIs."""
+        await self.authenticate()
+        path = '/infomaxai/auth/get_presigned_download_url?' + urlencode(
+            {'bucket':bucket, 'key':key, 'download_filename':download_filename})
+        refreshed = False
+        failures = 0
+        while True:
+            rejected = self._token
+            try:
+                try:
+                    response = await self._http.get(path, headers=self._headers())
+                except httpx.TimeoutException:
+                    raise InfoXError('timeout') from None
+                except httpx.HTTPError:
+                    raise InfoXError('network_error') from None
+                check_status(response.status_code)
+                try:
+                    url = response.json()
+                    self._validate_download_url(url, bucket, key)
+                except (ValueError, TypeError):
+                    raise InfoXError('invalid_response') from None
+                return url
+            except InfoXError as error:
+                if error.code == 'auth_expired' and not refreshed:
+                    await self._refresh_expired(rejected)
+                    refreshed = True
+                    continue
+                if error.code not in RETRYABLE or failures == 2:
+                    raise
+                await asyncio.sleep(self._retry_delay * 2 ** failures)
+                failures += 1
+
+    @staticmethod
+    def _validate_download_url(url, bucket, key):
+        if not isinstance(url, str) or any(ord(c) <= 32 for c in url):
+            raise InfoXError('invalid_response')
+        try:
+            parsed = urlsplit(url)
+            expected = '/' + bucket + '/' + key
+            if (parsed.scheme != 'https' or parsed.hostname != 'kr.object.iwinv.kr'
+                    or parsed.port not in (None, 443) or parsed.username or parsed.password or parsed.fragment
+                    or unquote(parsed.path) != expected or any(p in ('.', '..') for p in expected.split('/'))):
+                raise ValueError('invalid media url')
+        except (ValueError, TypeError):
+            raise InfoXError('invalid_response') from None
+
+    async def download_rendered_video(self, url, bucket, key, folder, filename) -> dict:
+        """Stream the exact MP4 with an independent credential-free HTTP client."""
+        from .downloads.files import async_writer, file_io
+        self._validate_download_url(url, bucket, key)
+        try:
+            async with asyncio.timeout(1200):
+                async with httpx.AsyncClient(verify=truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT),
+                        transport=self._media_transport, timeout=httpx.Timeout(30, connect=15),
+                        follow_redirects=False) as media:
+                    async with media.stream('GET', url, headers={'Accept-Encoding':'identity'}) as response:
+                        check_status(response.status_code)
+                        if response.status_code != 200 or response.headers.get('content-type','').split(';')[0] not in (
+                                'video/mp4','application/octet-stream'):
+                            raise InfoXError('invalid_media')
+                        async with async_writer(folder, filename) as writer:
+                            prefix = b''
+                            async for chunk in response.aiter_bytes(chunk_size=65536):
+                                if len(prefix) < 12:
+                                    prefix = (prefix + chunk)[:12]
+                                await file_io(writer.write, chunk)
+                            length = response.headers.get('content-length')
+                            if prefix[4:8] != b'ftyp' or (length is not None and (
+                                    not length.isdigit() or writer.size != int(length))):
+                                raise InfoXError('invalid_media')
+                            return await file_io(writer.finish)
+        except (TimeoutError, httpx.TimeoutException):
+            raise InfoXError('timeout') from None
+        except httpx.HTTPError:
+            raise InfoXError('network_error') from None
+
     async def render_charge_preview(self, video_id: str) -> dict:
         return await self._read('GET', f'/infomaxai/worker/render_charge_preview/{_identifier(video_id)}')
 

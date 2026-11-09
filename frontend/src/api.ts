@@ -1,5 +1,5 @@
 import type { EditorAttempt, InfoXPrepareInput, InfoXRun, Job, MyassetSource, SessionInfo, SourceFile } from './types'
-import type { PublicationRecord, PublishInput, RerenderInput, PublishCharge } from './types'
+import type { DownloadRecord, PublicationRecord, PublishInput, RerenderInput, PublishCharge } from './types'
 
 interface ApiErrorBody {
   detail?: string
@@ -47,6 +47,15 @@ export async function bootstrapSession(): Promise<SessionInfo> {
 }
 
 export const api = {
+  infoxDownloads(id: string) {
+    return request<{ downloads: DownloadRecord[] }>(`/api/infox-publications/${id}/downloads`)
+  },
+  startInfoxDownload(id: string, input: { intent_id: string; kind: 'video' | 'all' }) {
+    return request<DownloadRecord>(`/api/infox-publications/${id}/downloads`, { method: 'POST', body: JSON.stringify(input) })
+  },
+  retryInfoxDownload(id: string, intentId: string) {
+    return request<DownloadRecord>(`/api/infox-downloads/${id}/retry`, { method: 'POST', body: JSON.stringify({ intent_id: intentId }) })
+  },
   startInfoxPublication(runId: string, input: PublishInput): Promise<PublicationRecord> {
     return request(`/api/infox-runs/${encodeURIComponent(runId)}/publications`, { method: 'POST', body: JSON.stringify(input) })
   },

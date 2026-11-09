@@ -18,11 +18,12 @@ class PublishStop(Exception):
 
 
 class PublicationManager:
-    def __init__(self, store, client_factory, clipboard, *, timeouts=None, poll_interval=2):
+    def __init__(self, store, client_factory, clipboard, *, timeouts=None, poll_interval=2, downloads=None):
         self.store, self.client_factory, self.clipboard = store, client_factory, clipboard
         self.timeouts = timeouts or PublishTimeouts()
         self.poll_interval = poll_interval
         self.tasks = {}
+        self.downloads = downloads
 
     def active(self, id):
         return id in self.tasks and not self.tasks[id].done()
@@ -241,6 +242,10 @@ class PublicationManager:
                     r = await self._send(client, r, 'render', lambda: client.start_render(r.video_id), queue, connected, health)
                     r = self._transition(r, stage='rendering')
                     r = await self._verify(client, r, queue, health)
+                # Local downloads have separate state and cannot gate publication.
+                if self.downloads is not None:
+                    with suppress(Exception):
+                        await self.downloads.automatic(r.id)
                 async with asyncio.timeout(self.timeouts.metadata):
                     r = self._transition(r, stage='generating_metadata', progress=None)
                     r = await self._send(client, r, 'metadata_generate',

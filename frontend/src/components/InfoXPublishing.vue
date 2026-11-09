@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, watch } from 'vue'
+import InfoXDownloads from './InfoXDownloads.vue'
 import { api } from '../api'
 import { editorEligible } from '../infoxEditor'
 import { PublishingControl, formatPublishMetadata, publishStages, publishErrors } from '../infoxPublishing'
@@ -53,6 +54,7 @@ onBeforeUnmount(()=>control.dispose())
       <p v-if="record.uploaded_verified">InfoX의 해당 업로드 작업 결과와 일부공개 기록을 확인했습니다.</p>
       <a v-if="record.uploaded_verified && record.share_url" :href="record.share_url" target="_blank" rel="noopener noreferrer">{{ record.share_url }}</a>
       <button v-if="record.stage==='clipboard_failed' && !preparing" type="button" class="ghost-button" :disabled="busy || loading" @click="control.copy">링크 다시 복사</button>
+      <InfoXDownloads :key="record.id" :publication-id="record.id" :uploaded-verified="record.uploaded_verified" />
     </div>
     <details v-if="older.length">
       <summary>이전 게시 회차 ({{ older.length }})</summary>
@@ -61,6 +63,7 @@ onBeforeUnmount(()=>control.dispose())
           <p>{{ item.attempt_number }}회차 · {{ item.snapshot.market_date }} · {{ publishStages[item.stage] ?? '상태 확인 필요' }}</p>
           <p v-if="item.created_at"><time :datetime="item.created_at">{{ new Date(item.created_at).toLocaleString('ko-KR', {timeZone:'Asia/Seoul'}) }}</time></p>
           <a v-if="item.uploaded_verified && item.share_url" :href="item.share_url" target="_blank" rel="noopener noreferrer">{{ item.share_url }}</a>
+          <InfoXDownloads :key="item.id" :publication-id="item.id" :uploaded-verified="item.uploaded_verified" />
         </li>
       </ul>
     </details>
