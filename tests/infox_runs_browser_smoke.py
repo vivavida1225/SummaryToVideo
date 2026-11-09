@@ -76,50 +76,17 @@ def main():
                 edited = '  최종 편집 😀 대본  \n\n둘째 장면'
                 editor.fill(edited)
                 confirm = page.get_by_role('checkbox', name='검토 사유를 확인하고 이 대본을 사용합니다')
-                button = page.get_by_role('button', name='InfoX 전송본 확정', exact=True)
+                button = page.get_by_role('button', name='InfoX 영상 제작 시작', exact=True)
                 expect(button).to_be_disabled()
+                expect(page.get_by_text('검토 사유를 확인하고 사용 여부에 체크하세요.', exact=True)).to_be_visible()
                 confirm.check()
-                with page.expect_response(lambda response: response.url.endswith('/infox-runs')
-                        and response.request.method == 'POST') as prepared:
-                    button.click()
-                assert prepared.value.status == 201
-                record = prepared.value.json()
-                assert record['snapshot']['text'] == edited
-                assert record['snapshot']['settings']['title'] == '이 영상만 사용하는 제목'
-                assert record['snapshot']['revision'] == manager.get(job_id)['revision']
-                assert len(record['snapshot']['scenes']) == 2
-                assert record['project']['state'] == 'not_sent'
-                expect(page.get_by_text('전송본이 확정되었습니다.', exact=True)).to_be_visible()
-                # Repeated clicks, then disk restoration through fresh manager/store instances.
-                with page.expect_response(lambda response: response.url.endswith('/infox-runs')
-                        and response.request.method == 'POST') as duplicate:
-                    button.click()
-                assert duplicate.value.status == 200 and duplicate.value.json()['id'] == record['id']
-                app.state.infox_runs = RunService(JobManager(Settings(project)), RunStore(project))
-                manager.jobs.clear()
-                page.reload(wait_until='networkidle')
-                expect(page.get_by_text('전송본이 확정되었습니다.', exact=True)).to_be_visible()
-                assert app.state.infox_runs.get(record['id']).snapshot.text == edited
-                page.get_by_text('기본 제목 설정', exact=True).click()
-                template.fill('MMDD_다음영상')
-                page.get_by_role('button', name='기본값 저장 및 현재 제목에 적용', exact=True).click()
-                expect(title).to_have_value(f'{day}_다음영상')
-                assert app.state.infox_runs.get(record['id']).snapshot.settings.title == '이 영상만 사용하는 제목'
-                page.reload(wait_until='networkidle')
-                expect(title).to_have_value('이 영상만 사용하는 제목')
-                page.get_by_text('기본 제목 설정', exact=True).click()
-                expect(template).to_have_value('MMDD_다음영상')
-                page.get_by_text('기본 제목 설정', exact=True).click()
-                editor.fill('새로운 수정본')
-                expect(page.get_by_text('현재 편집본 또는 설정이 확정본과 다릅니다.', exact=True)).to_be_visible()
-                assert app.state.infox_runs.get(record['id']).snapshot.text == edited
-                # Start the previously confirmed snapshot after a later edit;
-                # backend manager owns admission and tracking independently of UI.
+                expect(button).to_be_enabled()
+                # The backend manager owns admission and tracking independently of UI.
+                # The controlled client is created lazily for the run the click confirms.
                 run_manager = app.state.infox_manager
-                fake = FakeClient(run_manager.store, run_manager.store.get(record['id']))
-                generated_read = fake.video_state
+                holder = {}
                 async def original_read(video_id):
-                    value = await generated_read(video_id)
+                    value = await holder['generated_read'](video_id)
                     # The service may return different narration/caption spelling.
                     # Production readiness trusts these texts; snapshots remain fixed.
                     value['video']['scenes'][0]['voiceover']['content'] = 'InfoX가 반환한 장면 대본'
@@ -133,12 +100,56 @@ def main():
                         scene['rootShape']['layers']['media']['props']['media'].pop('title', None)
                         scene['rootShape']['layers']['ROOT']['child'].append('missing-layer')
                     return value
-                fake.video_state = incomplete_assets
-                run_manager.client_factory = lambda: fake
+                def client_factory():
+                    if 'fake' not in holder:
+                        created = FakeClient(run_manager.store, run_manager.store.latest(job_id))
+                        holder['generated_read'] = created.video_state
+                        created.video_state = incomplete_assets
+                        holder['fake'] = created
+                    return holder['fake']
+                run_manager.client_factory = client_factory
                 start_requests = []
                 page.on('request', lambda req: start_requests.append(req.url) if req.url.endswith('/start') else None)
-                page.get_by_role('button', name='확정본으로 InfoX 제작 시작', exact=True).click()
+                # One click: latest script save, snapshot confirmation, then production.
+                with page.expect_response(lambda response: response.url.endswith('/infox-runs')
+                        and response.request.method == 'POST') as prepared:
+                    button.click()
+                assert prepared.value.status == 201
+                record = prepared.value.json()
+                assert record['snapshot']['text'] == edited
+                assert record['snapshot']['settings']['title'] == '이 영상만 사용하는 제목'
+                assert record['snapshot']['revision'] == manager.get(job_id)['revision']
+                assert len(record['snapshot']['scenes']) == 2
+                assert record['project']['state'] == 'not_sent'
                 expect(page.get_by_text('확인이 필요합니다. 기존 실행 상태를 확인하세요.', exact=True)).to_be_visible(timeout=10000)
+                fake = holder['fake']
+                assert fake.calls == ['project', 'generation'] and len(start_requests) == 1
+                expect(page.get_by_role('button', name='InfoX 영상 제작 시작', exact=True)).to_have_count(0)
+                # Disk restoration through fresh service/store instances.
+                app.state.infox_runs = RunService(JobManager(Settings(project)), RunStore(project))
+                manager.jobs.clear()
+                page.reload(wait_until='networkidle')
+                expect(page.get_by_text('확인이 필요합니다. 기존 실행 상태를 확인하세요.', exact=True)).to_be_visible()
+                assert app.state.infox_runs.get(record['id']).snapshot.text == edited
+                page.get_by_role('button', name='펼치기 제작 준비', exact=True).click()
+                page.get_by_text('기본 제목 설정', exact=True).click()
+                template.fill('MMDD_다음영상')
+                page.get_by_role('button', name='기본값 저장 및 현재 제목에 적용', exact=True).click()
+                expect(title).to_have_value(f'{day}_다음영상')
+                assert app.state.infox_runs.get(record['id']).snapshot.settings.title == '이 영상만 사용하는 제목'
+                page.reload(wait_until='networkidle')
+                page.get_by_role('button', name='펼치기 제작 준비', exact=True).click()
+                expect(title).to_have_value('이 영상만 사용하는 제목')
+                page.get_by_text('기본 제목 설정', exact=True).click()
+                expect(template).to_have_value('MMDD_다음영상')
+                page.get_by_text('기본 제목 설정', exact=True).click()
+                editor.fill('새로운 수정본')
+                expect(page.get_by_text('현재 편집본 또는 설정이 확정본과 다릅니다.', exact=True)).to_be_visible()
+                assert app.state.infox_runs.get(record['id']).snapshot.text == edited
+                def evidence():
+                    summary = page.get_by_text('장면별 검사·교체 근거', exact=True)
+                    if summary.locator('xpath=..').get_attribute('open') is None: summary.click()
+                evidence()
                 expect(page.get_by_role('region', name='기업 에셋 검사 결과')).to_be_visible()
                 link = page.get_by_role('link', name='InfoX 편집 화면 수동 열기')
                 expect(link).to_have_attribute('href', 'https://infox2.infomaxai.com/studio/library/videos/video-1?chatboxView=script')
@@ -148,6 +159,7 @@ def main():
                 page.reload(wait_until='networkidle')
                 expect(page.get_by_text('확인이 필요합니다. 기존 실행 상태를 확인하세요.', exact=True)).to_be_visible()
                 assert len(start_requests) == 1 and fake.calls == ['project', 'generation']
+                evidence()
                 # Reinspection changes only asset metadata, never the transmission snapshot.
                 saved_state = None
                 async def problem_assets(video_id):
@@ -171,6 +183,7 @@ def main():
                 expect(page.get_by_text('해당 파일의 검사할 메타데이터가 없습니다.', exact=True)).to_be_visible()
                 expect(page.get_by_text('확인 불가 항목은 미검출처럼 교체 대상에서 제외하며, 다음 단계 진행을 막지 않습니다.', exact=True)).to_be_visible()
                 page.reload(wait_until='networkidle')
+                evidence()
                 expect(page.get_by_text('기업명 검출 1 · 메타데이터 미검출 2 · 확인 불가 1 · 즐겨찾기 예외 0', exact=True)).to_be_visible()
                 expect(page.get_by_text('교체 계획 검증 완료 · 서버에는 저장하지 않았습니다.', exact=True)).to_be_visible(timeout=10000)
                 assert run_manager.store.get(record['id']).stage == 'replacement_planned'
@@ -183,6 +196,7 @@ def main():
                 chosen = run_manager.store.get(record['id']).replacement_plan.selections[0].candidate
                 assert chosen.id == 'item-0'
                 page.reload(wait_until='networkidle')
+                evidence()
                 expect(page.get_by_text('교체 계획 검증 완료 · 서버에는 저장하지 않았습니다.', exact=True)).to_be_visible()
                 page.get_by_role('button', name='고정한 교체 계획 다시 확인', exact=True).click()
                 expect(page.get_by_text('후보 선택과 로컬 변환을 확인하는 중…', exact=True)).to_be_visible()
@@ -204,26 +218,36 @@ def main():
                 page.get_by_role('button', name='검증한 교체 계획 서버 저장', exact=True).click()
                 expect(page.get_by_text('편집 데이터를 저장하는 중…', exact=True)).to_be_visible()
                 expect(page.get_by_text('서버를 다시 읽어 적용·보존 결과를 확인하는 중…', exact=True)).to_be_visible()
-                expect(page.get_by_text('서버 저장·재조회 검증 완료', exact=True)).to_be_visible(timeout=10000)
+                expect(page.get_by_role('region', name='자동 제작', exact=True)).to_have_attribute('data-status', 'done', timeout=10000)
+                def produce_open():
+                    # A finished step is folded to a one-line summary; expand to read its record.
+                    toggle = page.get_by_role('button', name='펼치기 자동 제작', exact=True)
+                    if toggle.count(): toggle.click()
+                produce_open()
+                expect(page.get_by_text('서버 저장·재조회 검증 완료', exact=True)).to_be_visible()
                 assert len(saves) == 1 and len(run_manager.store.get(record['id']).favorite_replacements) == 1
                 final_media = saved_state['video']['scenes'][0]['rootShape']['layers']['assigned']['props']['media']
                 assert final_media['image_files'][2]['filename'] == 'missing.jpg'
                 page.reload(wait_until='networkidle')
+                expect(page.get_by_text('서버 저장·재조회 검증 완료', exact=True)).not_to_be_visible()
+                produce_open()
                 expect(page.get_by_text('서버 저장·재조회 검증 완료', exact=True)).to_be_visible()
                 assert len(saves) == 1 and fake.calls == ['project','generation']
                 expect(page.get_by_text('교체 계획 검증 완료 · 서버에는 저장하지 않았습니다.', exact=True)).not_to_be_visible()
                 # Verify layout and capture only synthetic test data.
+                # The changed script keeps the preparation step open for a new run.
+                expect(page.get_by_role('button', name='수정본으로 새 제작 시작', exact=True)).to_be_visible()
                 for width in (320, 390, 1440):
                     page.set_viewport_size({'width': width, 'height': 1000})
                     page.get_by_text('기본 제목 설정', exact=True).click()
                     assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
-                    page.get_by_role('heading', name='영상 전송본 준비').scroll_into_view_if_needed()
+                    page.get_by_role('heading', name='InfoX 영상 제작').scroll_into_view_if_needed()
                     page.screenshot(path=str(root / f'.runtime/infox-title-{width}.png'), full_page=True)
                     page.get_by_text('기본 제목 설정', exact=True).click()
                 assert not errors, errors
                 assert not external_requests, 'Unexpected external browser requests'
                 browser.close()
-            print('PASS: dated/editable/persisted title defaults, independent title and frozen snapshot restore; review, one-shot generation, audit, mixed plan/save/readback, history restore; 320/390/1440px; no external requests or navigation')
+            print('PASS: dated/editable/persisted title defaults, independent title and frozen snapshot restore; review, unified save+confirm+start, one-shot generation, audit, mixed plan/save/readback, history restore; 320/390/1440px; no external requests or navigation')
         finally:
             server.should_exit = True
             thread.join(timeout=10)

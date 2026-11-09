@@ -34,6 +34,8 @@ export class EditorNavigation {
     ['waiting', 'navigate_intent'].includes(this.attempt.value?.state ?? '') ? labels.unknown :
     labels[this.attempt.value?.state ?? ''] ?? '브라우저 이동 기록이 없습니다. 기존 실행 복원은 조회만 수행합니다.'))
   private tab: Window | null = null
+  // A tab opened inside a click before the run exists; undefined = no reservation.
+  private reserved: Window | null | undefined = undefined
   private owner: string | null = null
   private runId: string | null = null
   private epoch = 0
@@ -42,6 +44,7 @@ export class EditorNavigation {
 
   reset() {
     this.epoch++
+    this.release()
     if (this.owner && this.tab && !this.tab.closed) this.tab.close()
     this.tab = null; this.owner = null; this.runId = null
     this.attempt.value = null; this.error.value = ''; this.restored.value = false
@@ -56,21 +59,43 @@ export class EditorNavigation {
     } catch { if (epoch === this.epoch) this.error.value = '이동 기록 조회 실패 · 열린 탭을 먼저 확인하세요. 자동으로 다시 열지 않습니다.' }
   }
 
+  /** Opens the waiting tab synchronously in a click, before the run id is known. */
+  reserve(): boolean {
+    if (this.busy.value || this.navigating.value || this.owner || this.reserved !== undefined) return false
+    this.reserved = this.openWaiting()
+    return true
+  }
+
+  /** Closes only a reserved tab that was never attached to a run. */
+  release() {
+    const tab = this.reserved
+    this.reserved = undefined
+    if (tab && !tab.closed) tab.close()
+  }
+
+  private openWaiting(): Window | null {
+    const tab = this.open()
+    if (tab) {
+      tab.opener = null
+      tab.document.title = 'InfoX 검증 대기'
+      tab.document.body.textContent = 'InfoX 서버 검증 대기 중입니다. 검증 완료 뒤 같은 실행의 편집기로 이동합니다. 이 탭을 닫으면 원래 앱에서 다시 열 수 있습니다.'
+    }
+    return tab
+  }
+
   async begin(id: string, mode: 'automatic' | 'manual') {
-    if (this.busy.value || this.navigating.value || this.owner) return
+    if (this.busy.value || this.navigating.value || this.owner) { this.release(); return }
     this.epoch++ // Invalidate an earlier restore before consuming ownership.
     this.busy.value = true; this.error.value = ''; this.restored.value = false
     const epoch = this.epoch
     const attemptId = crypto.randomUUID().replaceAll('-', '')
     let tab: Window | null = null
     try {
-      // This runs before the first await, inside the user's click activation.
-      tab = this.open()
-      if (tab) {
-        tab.opener = null
-        tab.document.title = 'InfoX 검증 대기'
-        tab.document.body.textContent = 'InfoX 서버 검증 대기 중입니다. 검증 완료 뒤 같은 실행의 편집기로 이동합니다. 이 탭을 닫으면 원래 앱에서 다시 열 수 있습니다.'
-      }
+      // Without a reservation this runs before the first await, inside the click activation.
+      const reserved = this.reserved
+      this.reserved = undefined
+      // A reserved tab closed meanwhile is reported as closed by checkClosed().
+      tab = reserved !== undefined ? reserved : this.openWaiting()
       const result = await this.port.claimEditor(id, { attempt_id: attemptId, mode, tab_state: tab ? 'created' : 'blocked' })
       if (epoch !== this.epoch) { tab?.close(); return }
       this.attempt.value = result.attempt

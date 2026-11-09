@@ -76,7 +76,8 @@ def scenario(playwright, root, mode):
             page.on('pageerror', lambda error: errors.append(str(error)))
             context.add_init_script(f"sessionStorage.setItem('market-compressor.job-id', '{r.snapshot.job_id}')")
             page.goto(url, wait_until='networkidle')
-            start = page.get_by_role('button', name='확정본으로 InfoX 제작 시작', exact=True)
+            # A restored confirmation never starts by itself; the user continues explicitly.
+            start = page.get_by_role('button', name='확정본으로 제작 계속', exact=True)
             expect(start).to_be_enabled()
             if mode == 'blocked':
                 page.evaluate('window.open = () => null')
@@ -127,7 +128,13 @@ def scenario(playwright, root, mode):
                     }""", r.id)
                     assert not second['claimed']; other.close()
             gate.set()
-            expect(page.get_by_text('무변경 재조회 검증 완료 · 서버 저장 없음', exact=True)).to_be_visible(timeout=20000)
+            def verified_unchanged(timeout=5000):
+                expect(page.get_by_role('region', name='자동 제작', exact=True)).to_have_attribute('data-status', 'done', timeout=timeout)
+                # The finished production step is folded; expand it to read the save record.
+                toggle = page.get_by_role('button', name='펼치기 자동 제작', exact=True)
+                if toggle.count(): toggle.click()
+                expect(page.get_by_text('무변경 재조회 검증 완료 · 서버 저장 없음', exact=True)).to_be_visible()
+            verified_unchanged(20000)
             automatic = mode in ('duplicate', 'normal', 'backend_restart')
             if automatic:
                 expect(waiting.get_by_role('heading', name='Controlled editor: login required')).to_be_visible()
@@ -144,7 +151,7 @@ def scenario(playwright, root, mode):
                 if mode == 'lost_ack':
                     expect(page.get_by_text('브라우저 이동 결과가 불명확합니다.', exact=False)).to_be_visible()
             page.reload(wait_until='networkidle')
-            expect(page.get_by_text('무변경 재조회 검증 완료 · 서버 저장 없음', exact=True)).to_be_visible()
+            verified_unchanged()
             page.wait_for_timeout(1200)
             assert len(editor_requests) == (1 if automatic else 0)
             with page.expect_popup() as reopened:

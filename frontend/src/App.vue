@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import InfoXPublishing from './components/InfoXPublishing.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { api, ApiError, bootstrapSession } from './api'
@@ -8,7 +7,13 @@ import StatusTimeline from './components/StatusTimeline.vue'
 import InfoXAssetAudit from './components/InfoXAssetAudit.vue'
 import InfoXAssetSave from './components/InfoXAssetSave.vue'
 import InfoXReplacementPlan from './components/InfoXReplacementPlan.vue'
+import InfoXProgress from './components/InfoXProgress.vue'
+import InfoXPublishing from './components/InfoXPublishing.vue'
+import InfoXStep from './components/InfoXStep.vue'
 import { EditorNavigation, editorEligible, editorUrl } from './infoxEditor'
+import { assetSummary, currentStep, infoxActiveStages, infoxSteps, productionProgress, publicationProgress, runTracking,
+  stepStatusLabels, type InfoxStep, type InfoxStepKey } from './infoxFlow'
+import { PublishingControl, formatPublishMetadata, publishErrors, publishStages } from './infoxPublishing'
 import { DEFAULT_INFOX_TITLE_TEMPLATE, formatInfoxTitle, validInfoxTitleTemplate } from './infoxTitle'
 import type { InfoXPrepareInput, InfoXRun, Job, SessionInfo, SourceFile } from './types'
 
@@ -71,9 +76,17 @@ async function reopenEditor() {
   await editorNavigation.begin(record.id, 'manual')
   if (infoxRun.value?.id === record.id) await editorNavigation.advance(infoxRun.value)
 }
+// Owned here so step layout changes never dispose it or replay its requests.
+const publishing = new PublishingControl(api)
+const publishingRunId = computed(() => infoxRun.value?.video_id ? infoxRun.value.id : null)
+const infoxEditorReady = computed(() => !!infoxRun.value && editorEligible(infoxRun.value))
+watch(publishingRunId, id => {
+  if (id) void publishing.restore(id, infoxEditorReady.value)
+  else publishing.dispose()
+})
+watch(infoxEditorReady, eligible => { if (publishingRunId.value) void publishing.setEligibility(eligible) })
 let infoxPollTimer: number | undefined
 let editorTabTimer: number | undefined
-const infoxActiveStages = new Set(['creating_project', 'project_created', 'starting_generation', 'generating', 'checking_draft', 'auditing_assets', 'selecting_favorites', 'replacing_assets', 'saving_assets', 'verifying_assets'])
 const infoxStageLabels: Record<string, string> = {
   prepared: '전송본 확정 · 제작 요청 전', creating_project: 'InfoX 프로젝트 생성 요청 중',
   project_created: '프로젝트 접수 · 영상 ID 확보', starting_generation: '시안 제작 시작 요청 중',
@@ -225,13 +238,9 @@ function pollInfox(id: string) {
   }, 1000)
 }
 
-async function startInfox() {
-  if (!infoxRun.value || infoxStarting.value || infoxLoading.value || inputBusy.value) return
-  const id = infoxRun.value.id
-  const jobId = job.value?.id
-  infoxStarting.value = true
-  infoxError.value = ''
-  // Reserve the window synchronously in the click; claim is durable before start.
+async function requestInfoxStart(id: string, jobId: string | undefined) {
+  // Synchronous up to its first await: inside a click it opens the waiting tab
+  // itself, otherwise it consumes the tab reserved earlier in the same click.
   const browserClaim = editorNavigation.begin(id, 'automatic')
   try {
     await browserClaim
@@ -244,7 +253,76 @@ async function startInfox() {
       infoxError.value = '요청 결과가 불명확합니다. 보관된 실행을 조회합니다. ' + friendlyError(error)
       pollInfox(id) // Only GET; never replay an uncertain start POST.
     }
-  } finally { infoxStarting.value = false }
+  }
+}
+
+async function startInfox() {
+  if (!infoxRun.value || infoxStarting.value || infoxLoading.value || inputBusy.value) return
+  infoxStarting.value = true
+  infoxError.value = ''
+  try { await requestInfoxStart(infoxRun.value.id, job.value?.id) } finally { infoxStarting.value = false }
+}
+
+// One click: check inputs, reserve the editor tab, save the latest script,
+// confirm that revision and settings, then start production of that snapshot.
+async function beginInfoxProduction() {
+  if (!job.value || infoxPending.value || infoxStartBlocker.value || inputBusy.value || infoxStarting.value) return
+  if (infoxRun.value && !infoxRestartable.value) return
+  const id = job.value.id
+  actionBusy.value = true
+  infoxStarting.value = true
+  infoxError.value = ''
+  editorNavigation.reserve() // Must stay before the first await (click activation).
+  let attached = false
+  try {
+    await flushCompressed()
+    if (disposed || job.value?.id !== id) return
+    if (composingCompressed.value || compressedDirty.value || compressedSaveError.value) {
+      throw new Error('최신 대본 저장을 완료한 뒤 다시 시작하세요.')
+    }
+    const pending: InfoXPrepareInput = {
+      intent_id: crypto.randomUUID(), revision: job.value.revision ?? 0,
+      settings: { title: infoxTitle.value, auto_replace: infoxAutoReplace.value },
+      review_confirmed: infoxReviewConfirmed.value, new_run: false,
+    }
+    infoxPending.value = pending
+    writeStored('sessionStorage', infoxPendingKey(id), JSON.stringify(pending))
+    let record: InfoXRun
+    try {
+      record = await withInfoxSession(() => api.prepareInfox(id, pending))
+    } catch (error) {
+      if (disposed || job.value?.id !== id) return
+      // A received 4xx (except session expiry) proves the preparation was rejected.
+      if (error instanceof ApiError && error.status >= 400 && error.status < 500 && error.status !== 403) {
+        infoxPending.value = null
+        writeStored('sessionStorage', infoxPendingKey(id), null)
+        infoxError.value = friendlyError(error)
+      } else {
+        infoxError.value = '전송본 확정 응답을 확인하지 못했습니다. 제작은 시작하지 않았습니다. 확정 결과 다시 확인을 누르세요. ' + friendlyError(error)
+      }
+      return
+    }
+    if (disposed || job.value?.id !== id) return
+    infoxRun.value = record
+    infoxPending.value = null
+    writeStored('sessionStorage', infoxPendingKey(id), null)
+    if (record.stage !== 'prepared' || record.requires_reconciliation) {
+      // The same snapshot already has a run: show it, never start it again.
+      announcement.value = '같은 전송본의 기존 실행이 있어 기존 상태를 표시합니다.'
+      if (runTracking(record)) pollInfox(record.id)
+      return
+    }
+    announcement.value = 'InfoX 전송본을 확정했습니다. 제작을 요청합니다.'
+    attached = true
+    actionBusy.value = false
+    await requestInfoxStart(record.id, id)
+  } catch (error) {
+    if (!disposed && job.value?.id === id) infoxError.value = friendlyError(error)
+  } finally {
+    if (!attached) editorNavigation.release() // Close only the tab this click opened.
+    actionBusy.value = false
+    infoxStarting.value = false
+  }
 }
 
 async function auditInfox() {
@@ -519,6 +597,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   stopInfoxPolling()
+  publishing.dispose()
   window.clearInterval(editorTabTimer)
   editorNavigation.reset()
   window.removeEventListener('beforeunload', warnUnsaved)
@@ -699,6 +778,157 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
     actionBusy.value = false
   }
 }
+// ---- InfoX step display model (display only; execution guards stay in handlers) ----
+const infoxStartBlocker = computed(() => {
+  if (infoxLoading.value) return '보관된 실행 기록을 확인하는 중입니다.'
+  if (isRunning.value) return '대본 생성이 끝난 뒤 시작할 수 있습니다.'
+  if (composingCompressed.value) return '한글 입력을 완료한 뒤 시작할 수 있습니다.'
+  if (!compressedDraft.value.trim()) return '대본이 비어 있어 시작할 수 없습니다.'
+  if (!infoxTitle.value.trim()) return '영상 제목을 입력하세요.'
+  if (infoxNeedsReview.value && !infoxReviewConfirmed.value) return '검토 사유를 확인하고 사용 여부에 체크하세요.'
+  return ''
+})
+// A changed script may start a new run only when the current run is not being tracked.
+const infoxRestartable = computed(() => !!infoxRun.value && infoxChanged.value && !runTracking(infoxRun.value) &&
+  infoxRun.value.stage !== 'prepared' && !infoxRun.value.requires_reconciliation)
+const infoxStepList = computed(() => infoxSteps({ run: infoxRun.value, pending: !!infoxPending.value,
+  publication: publishing.record.value, preparingPublication: publishing.preparing.value }))
+const infoxStep = computed(() => Object.fromEntries(infoxStepList.value.map(step => [step.key, step])) as Record<InfoxStepKey, InfoxStep>)
+const infoxCurrent = computed(() => currentStep(infoxStepList.value))
+const infoxAssets = computed(() => assetSummary(infoxRun.value))
+const infoxProgress = computed(() => infoxCurrent.value.key === 'produce' ? productionProgress(infoxRun.value)
+  : ['publish', 'complete'].includes(infoxCurrent.value.key) ? publicationProgress(publishing.record.value) : null)
+
+interface InfoxAction { key: string; label: string; disabled: boolean; run: () => void }
+
+// Manual production actions, in priority order. The first is the primary action.
+const infoxManualActions = computed<InfoxAction[]>(() => {
+  const run = infoxRun.value
+  if (!run || infoxPending.value) return []
+  const locked = inputBusy.value || infoxLoading.value || infoxStarting.value
+  const tracked = locked || !!run.tracking_active
+  const unsaved = !run.asset_save || run.asset_save.state === 'not_started'
+  const actions: InfoxAction[] = []
+  if (['prepared', 'needs_attention', 'project_created'].includes(run.stage) && (!run.asset_audit || run.asset_audit.state === 'not_started')) {
+    actions.push({ key: 'start', label: run.stage === 'prepared' ? '확정본으로 제작 계속' : '기존 제작 상태 확인', disabled: locked, run: startInfox })
+  }
+  if (run.continuation === 'automatic' && run.stage === 'needs_attention' && run.asset_audit?.state !== 'not_started' && run.asset_save?.state === 'not_started') {
+    actions.push({ key: 'continue', label: '기존 자동 실행 계속 확인', disabled: tracked, run: startInfox })
+  }
+  if (['ready', 'not_needed'].includes(run.replacement_plan?.state ?? '') && !['saved_verified', 'unchanged_verified'].includes(run.asset_save?.state ?? '')) {
+    actions.push({ key: 'save', disabled: tracked, run: saveInfox,
+      label: !unsaved ? '기존 저장·검증 상태 다시 확인' : run.replacement_plan?.state === 'not_needed' ? '교체 불필요 상태 서버 재확인' : '검증한 교체 계획 서버 저장' })
+  }
+  if (unsaved && run.asset_audit?.state === 'completed' && run.snapshot.settings.auto_replace && !run.requires_reconciliation &&
+      (['assets_audited', 'replacement_planned', 'needs_attention'].includes(run.stage) || (run.stage === 'selecting_favorites' && !run.tracking_active))) {
+    actions.push({ key: 'plan', disabled: tracked, run: planInfox,
+      label: !run.replacement_plan || run.replacement_plan.state === 'not_started' ? '즐겨찾기 교체 계획 만들기' : '고정한 교체 계획 다시 확인' })
+  }
+  if (unsaved && run.tracking?.completion_seen && !run.requires_reconciliation &&
+      (['draft_ready', 'assets_audited', 'replacement_planned', 'needs_attention'].includes(run.stage) || (run.stage === 'auditing_assets' && !run.tracking_active))) {
+    actions.push({ key: 'audit', disabled: tracked, run: auditInfox,
+      label: !run.asset_audit || run.asset_audit.state === 'not_started' ? '기업 에셋 검사' : '배정 에셋 다시 검사' })
+  }
+  return actions
+})
+
+const publishStartBlocker = computed(() => {
+  if (publishing.loading.value) return '게시 기록과 이용량을 확인하는 중입니다.'
+  if (publishing.busy.value || publishing.uncertain.value) return '이전 게시 요청의 결과를 확인하는 중입니다. 같은 요청을 다시 보내지 않습니다.'
+  if (!formatPublishMetadata(publishing.marketDate.value)) return '올바른 게시 기준일을 선택하세요.'
+  const charge = publishing.charge.value
+  if (charge?.blocked_reason) return publishErrors[charge.blocked_reason] ?? '게시 조건을 확인하지 못했습니다. 다시 준비하세요.'
+  if (!charge?.available) return '렌더 이용량을 확인하지 못해 시작할 수 없습니다. 화면을 새로고침해 다시 확인하세요.'
+  if (!charge.can_start) return '게시 시작 조건을 충족하지 못했습니다.'
+  return ''
+})
+
+type PrimaryAction = InfoxAction & { hint: string; busyLabel?: string }
+const infoxPrimary = computed<PrimaryAction | null>(() => {
+  const run = infoxRun.value
+  if (infoxPending.value) {
+    return { key: 'recheck', label: '확정 결과 다시 확인', busyLabel: '확정 결과 확인 중…', hint: '',
+      disabled: inputBusy.value || infoxLoading.value || composingCompressed.value, run: prepareInfox }
+  }
+  if (!run) {
+    return { key: 'begin', label: 'InfoX 영상 제작 시작', busyLabel: '제작을 준비하는 중…', hint: infoxStartBlocker.value,
+      disabled: !!infoxStartBlocker.value || inputBusy.value || infoxStarting.value, run: beginInfoxProduction }
+  }
+  const manual = infoxManualActions.value[0]
+  if (manual) {
+    return { ...manual, busyLabel: '요청 확인 중…',
+      hint: manual.disabled && run.tracking_active ? '진행 중인 추적이 끝난 뒤 사용할 수 있습니다.' : '' }
+  }
+  if (!infoxEditorReady.value) return null
+  const record = publishing.record.value
+  if (!record || publishing.preparing.value) {
+    const hint = publishStartBlocker.value
+    return { key: 'publish', label: '편집 완료 · 렌더 및 유튜브 업로드', hint, disabled: !publishing.canStart.value || !!hint,
+      run: () => { void publishing.start() } }
+  }
+  if (record.stage === 'clipboard_failed') {
+    return { key: 'copy', label: '링크 다시 복사', hint: '', disabled: publishing.busy.value || publishing.loading.value,
+      run: () => { void publishing.copy() } }
+  }
+  return null
+})
+const infoxSecondary = computed(() => infoxManualActions.value.slice(1))
+const infoxPrimaryBusy = computed(() => {
+  const key = infoxPrimary.value?.key ?? ''
+  if (key === 'recheck') return actionBusy.value
+  if (key === 'publish' || key === 'copy') return publishing.busy.value
+  return infoxStarting.value
+})
+
+const infoxHeadline = computed(() => {
+  const run = infoxRun.value
+  if (infoxPending.value) return '이전 확정 요청 확인 필요'
+  if (!run) return infoxStarting.value ? '대본 저장·전송본 확정 중' : '전송본 확정 전'
+  if (infoxStep.value.produce.status !== 'done') return infoxStageLabels[run.stage] ?? run.stage
+  const record = publishing.record.value
+  if (!record || publishing.preparing.value) return publishing.loading.value ? '게시 기록 확인 중' : '편집 후 게시 대기'
+  if (record.stage === 'completed') return '게시 완료 · 링크 확인 가능'
+  if (record.stage === 'clipboard_failed') return '업로드 완료 · 링크 복사 필요'
+  if (record.stage === 'failed') return '게시가 중단되었습니다'
+  if (record.stage === 'needs_attention') return '게시 상태 확인이 필요합니다'
+  return '게시 진행 중'
+})
+
+const infoxNext = computed(() => {
+  const run = infoxRun.value
+  const step = infoxCurrent.value
+  if (infoxPending.value) return '이전 요청의 확정 결과부터 확인합니다. 추가 편집은 기존 전송본과 분리됩니다.'
+  if (!run) return '제목과 설정을 확인한 뒤 시작하세요. 최신 대본 저장, 전송본 확정, 제작 요청을 차례로 실행합니다.'
+  if (run.stage === 'prepared' && !run.requires_reconciliation) return '확정 상태만 보관되어 있습니다. 확정본으로 제작 계속을 눌러야 제작을 시작합니다.'
+  if (step.key === 'produce') {
+    if (run.requires_reconciliation) return '자동 제작 단계에서 접수 여부를 확인하세요. 같은 요청을 다시 보내지 않습니다.'
+    if (step.status === 'active') return '자동으로 진행 중입니다. 결과가 확인되면 다음 단계가 표시됩니다.'
+    if (step.status === 'failed') return '제작 실패가 확인되었습니다. 자동 제작 단계에서 원인을 확인하세요.'
+    if (infoxManualActions.value.length) return '아래 버튼으로 다음 처리를 진행하세요.'
+    return '자동 제작 단계에서 원인을 확인한 뒤 진행 상태를 다시 조회하세요.'
+  }
+  const record = publishing.record.value
+  if (step.key === 'publish') {
+    if (!record || publishing.preparing.value) return 'InfoX 편집기에서 편집하고 저장한 뒤 렌더와 일부공개 업로드를 시작하세요.'
+    if (step.status === 'active') return '렌더와 업로드를 자동으로 진행합니다. 실행 중에는 편집을 계속하지 마세요.'
+    return '원인을 확인한 뒤 필요하면 새 회차 렌더·업로드를 준비하세요.'
+  }
+  if (record?.stage === 'clipboard_failed') return '업로드와 링크는 확인되었습니다. 링크 복사만 다시 시도하세요.'
+  return '검증된 영상 링크를 확인하세요.'
+})
+
+const infoxSummaries = computed<Partial<Record<InfoxStepKey, string>>>(() => {
+  const run = infoxRun.value
+  const assets = infoxAssets.value
+  const record = publishing.record.value
+  return {
+    prepare: run ? `전송본 v${run.snapshot.revision} · ${run.snapshot.scenes.length}장면 · ${run.snapshot.settings.title}` : undefined,
+    produce: assets ? `기업명 검출 ${assets.detected} · 확인 불가 ${assets.unknown} · 교체 ${assets.replacements ?? '-'}${assets.saveLabel ? ` · ${assets.saveLabel}` : ''}` : undefined,
+    publish: record ? `${record.attempt_number ?? 1}회차 · 기준일 ${record.snapshot.market_date} · ${publishStages[record.stage] ?? '상태 확인 필요'}` : undefined,
+    complete: record?.uploaded_verified && record.share_url ? record.share_url : undefined,
+  }
+})
+const infoxEditorStatusVisible = computed(() => !!editorAttempt.value || !!editorNavigation.error.value)
 </script>
 
 <template>
@@ -912,87 +1142,158 @@ async function downloadResult(stage: 'serialized' | 'compressed') {
           />
         </div>
         <section v-if="job.compressed !== null" class="infox-preparation" aria-labelledby="infox-heading">
-          <div>
+          <header class="infox-heading">
             <p class="eyebrow">INFOX</p>
-            <h3 id="infox-heading">영상 전송본 준비</h3>
-            <p>대본과 설정을 확정해 보관한 뒤, 확정본으로 제작을 시작합니다.</p>
-          </div>
-          <label for="infox-title">InfoX 영상 제목</label>
-          <input id="infox-title" v-model="infoxTitle" type="text" maxlength="200" :disabled="inputBusy || infoxLoading || !!infoxPending" />
-          <details class="infox-title-settings">
-            <summary>기본 제목 설정</summary>
-            <div class="infox-title-settings-fields">
-              <label for="infox-title-template">기본 제목 형식</label>
-              <input id="infox-title-template" v-model="infoxTitleTemplateDraft" type="text" maxlength="200" aria-describedby="infox-title-template-help" :disabled="inputBusy || infoxLoading || !!infoxPending" />
-              <p id="infox-title-template-help">MMDD는 한국 시간의 오늘 월일로 바뀝니다. 기본 형식은 이 브라우저에 저장됩니다.</p>
-              <p v-if="infoxTitleTemplateValid">미리보기: {{ formatInfoxTitle(infoxTitleTemplateDraft) }}</p>
-              <p v-else>비어 있지 않은 200자 이하의 제목 형식을 입력하세요.</p>
-              <button type="button" class="ghost-button" :disabled="!infoxTitleTemplateValid || inputBusy || infoxLoading || !!infoxPending" @click="saveInfoxTitleTemplate">기본값 저장 및 현재 제목에 적용</button>
-              <p v-if="infoxTitleTemplateError" class="inline-error" role="alert">{{ infoxTitleTemplateError }}</p>
-              <p v-if="infoxTitleTemplateSaved" role="status">기본 제목을 저장하고 현재 제목에 적용했습니다.</p>
-            </div>
-          </details>
-          <p>템플릿 1786 · 남/아나운서/당당 · 속도 1.0 · 목표 60초</p>
-          <label class="transcribe-toggle">
-            <input v-model="infoxAutoReplace" type="checkbox" :disabled="inputBusy || infoxLoading || !!infoxPending" />
-            <span>반도체 즐겨찾기 자동 대체 사용</span>
-          </label>
-          <label v-if="infoxNeedsReview" class="transcribe-toggle">
-            <input v-model="infoxReviewConfirmed" type="checkbox" :disabled="inputBusy || infoxLoading || !!infoxPending" />
-            <span>검토 사유를 확인하고 이 대본을 사용합니다</span>
-          </label>
-          <p v-if="infoxPending">이전 요청의 확정 결과부터 확인합니다. 추가 편집은 기존 전송본과 분리됩니다.</p>
-          <div v-if="infoxError" class="inline-error" role="alert">{{ infoxError }}</div>
-          <button class="ghost-button" type="button" @click="prepareInfox"
-            :disabled="inputBusy || infoxLoading || composingCompressed ||
-              (!infoxPending && (!compressedDraft.trim() || !infoxTitle.trim() || (infoxNeedsReview && !infoxReviewConfirmed)))">
-            {{ actionBusy ? '확정하는 중…' : infoxPending ? '확정 결과 다시 확인' : 'InfoX 전송본 확정' }}
-          </button>
-          <div v-if="infoxRun" class="infox-summary" aria-live="polite">
-            <strong>{{ infoxRun.stage === 'prepared' ? '전송본이 확정되었습니다.' : '보관된 실행 기록을 복원했습니다.' }}</strong>
-            <p>{{ infoxStageLabels[infoxRun.stage] ?? infoxRun.stage }}</p>
-            <p v-if="infoxRun.tracking?.progress != null">제작 진행 표시 {{ infoxRun.tracking.progress }}%<template v-if="infoxActiveStages.has(infoxRun.stage) && !infoxRun.tracking.completion_seen"> · 완료 판정은 작업 이벤트와 결과 검증을 기다립니다.</template></p>
-            <p v-if="infoxRun.tracking?.error_code">{{ infoxErrorLabels[infoxRun.tracking.error_code] ?? '기존 실행을 확인하세요.' }}</p>
-            <p>확정 대본 버전 {{ infoxRun.snapshot.revision }} · {{ infoxRun.snapshot.scenes.length }}장면 · {{ infoxRun.snapshot.settings.title }}</p>
-            <p v-if="infoxRun.requires_reconciliation">접수 여부 확인이 필요합니다. 기존 실행은 다시 전송하지 않습니다.</p>
-            <p v-if="infoxChanged">현재 편집본 또는 설정이 확정본과 다릅니다.</p>
-            <p v-if="infoxRun.video_id">영상 ID: {{ infoxRun.video_id }} · 작업 ID: {{ infoxRun.task_id ?? '접수 확인 전' }}</p>
-            <button v-if="['prepared', 'needs_attention', 'project_created'].includes(infoxRun.stage) && (!infoxRun.asset_audit || infoxRun.asset_audit.state === 'not_started')" type="button" class="ghost-button"
-              :disabled="inputBusy || infoxLoading || infoxStarting" @click="startInfox">
-              {{ infoxStarting ? '요청 확인 중…' : infoxRun.stage === 'prepared' ? '확정본으로 InfoX 제작 시작' : '기존 실행 상태 다시 확인' }}
-            </button>
-            <button v-if="infoxActiveStages.has(infoxRun.stage)" type="button" class="ghost-button" @click="pollInfox(infoxRun.id)">진행 상태 다시 조회</button>
-            <button v-if="infoxRun.continuation === 'automatic' && infoxRun.stage === 'needs_attention' && infoxRun.asset_audit?.state !== 'not_started' && infoxRun.asset_save?.state === 'not_started'"
-              type="button" class="ghost-button" :disabled="inputBusy || infoxLoading || infoxStarting || infoxRun.tracking_active" @click="startInfox">기존 자동 실행 계속 확인</button>
-            <button v-if="(!infoxRun.asset_save || infoxRun.asset_save.state === 'not_started') && infoxRun.tracking?.completion_seen && !infoxRun.requires_reconciliation && (['draft_ready', 'assets_audited', 'replacement_planned', 'needs_attention'].includes(infoxRun.stage) || (infoxRun.stage === 'auditing_assets' && !infoxRun.tracking_active))"
-              type="button" class="ghost-button" :disabled="inputBusy || infoxLoading || infoxStarting || infoxRun.tracking_active" @click="auditInfox">
-              {{ infoxStarting ? '검사 요청 중…' : !infoxRun.asset_audit || infoxRun.asset_audit.state === 'not_started' ? '기업 에셋 검사' : '배정 에셋 다시 검사' }}
-            </button>
-            <InfoXAssetAudit v-if="infoxRun.asset_audit" :audit="infoxRun.asset_audit" :save-started="!!infoxRun.asset_save && infoxRun.asset_save.state !== 'not_started'" />
-            <button v-if="(!infoxRun.asset_save || infoxRun.asset_save.state === 'not_started') && infoxRun.asset_audit?.state === 'completed' && infoxRun.snapshot.settings.auto_replace && !infoxRun.requires_reconciliation &&
-              (['assets_audited', 'replacement_planned', 'needs_attention'].includes(infoxRun.stage) || (infoxRun.stage === 'selecting_favorites' && !infoxRun.tracking_active))"
-              type="button" class="ghost-button" :disabled="inputBusy || infoxLoading || infoxStarting || infoxRun.tracking_active" @click="planInfox">
-              {{ infoxStarting ? '요청 확인 중…' : !infoxRun.replacement_plan || infoxRun.replacement_plan.state === 'not_started' ? '즐겨찾기 교체 계획 만들기' : '고정한 교체 계획 다시 확인' }}
-            </button>
-            <InfoXReplacementPlan v-if="infoxRun.replacement_plan" :plan="infoxRun.replacement_plan" :save-started="!!infoxRun.asset_save && infoxRun.asset_save.state !== 'not_started'" />
-            <button v-if="['ready', 'not_needed'].includes(infoxRun.replacement_plan?.state ?? '') && !['saved_verified', 'unchanged_verified'].includes(infoxRun.asset_save?.state ?? '')"
-              type="button" class="ghost-button" :disabled="inputBusy || infoxLoading || infoxStarting || infoxRun.tracking_active" @click="saveInfox">
-              {{ infoxRun.asset_save && infoxRun.asset_save.state !== 'not_started' ? '기존 저장·검증 상태 다시 확인' : infoxRun.replacement_plan?.state === 'not_needed' ? '교체 불필요 상태 서버 재확인' : '검증한 교체 계획 서버 저장' }}
-            </button>
-            <InfoXAssetSave v-if="infoxRun.asset_save" :save="infoxRun.asset_save" />
-            <section class="infox-asset-audit" aria-label="편집기 브라우저 이동">
-              <h4>편집기 브라우저 이동</h4>
-              <p role="status">{{ editorMessage }}</p>
-              <p v-if="!editorEligible(infoxRun)">서버 검증이 아직 완료되지 않아 자동 이동을 보류합니다. 위의 검사·후보·저장 원인을 확인하세요. 수동 편집 링크는 사용할 수 있습니다.</p>
-              <button v-if="editorEligible(infoxRun)" type="button" class="ghost-button" :disabled="editorBusy" @click="reopenEditor">편집기 다시 열기</button>
-              <template v-if="editorAttempt && ['navigation_requested', 'login_required', 'ready_reported'].includes(editorAttempt.state)">
-                <button type="button" class="ghost-button" :disabled="editorBusy" @click="editorNavigation.report('login_required')">로그인 필요 상태 기록</button>
-                <button type="button" class="ghost-button" :disabled="editorBusy" @click="editorNavigation.report('failed')">이동 실패 상태 기록</button>
-                <button type="button" class="ghost-button" :disabled="editorBusy" @click="editorNavigation.report('ready_reported')">편집기 준비 사용자 확인</button>
+            <h3 id="infox-heading">InfoX 영상 제작</h3>
+            <ol class="infox-stepper" aria-label="InfoX 진행 단계">
+              <li v-for="step in infoxStepList" :key="step.key" :data-status="step.status"
+                :aria-current="step.key === infoxCurrent.key ? 'step' : undefined">
+                <span aria-hidden="true">{{ step.number }}</span>{{ step.title }}<span class="sr-only">{{ ' · ' + stepStatusLabels[step.status] }}</span>
+              </li>
+            </ol>
+          </header>
+          <div class="infox-layout">
+            <aside class="infox-panel" aria-label="InfoX 현재 상태와 다음 행동">
+              <p class="infox-panel-step">
+                <span>{{ infoxCurrent.number }}단계 · {{ infoxCurrent.title }}</span>
+                <span class="infox-badge" :data-status="infoxCurrent.status">{{ stepStatusLabels[infoxCurrent.status] }}</span>
+              </p>
+              <p class="infox-panel-headline" role="status">{{ infoxHeadline }}</p>
+              <InfoXProgress v-if="infoxProgress" :progress="infoxProgress"
+                :name="infoxCurrent.key === 'produce' ? '현재 제작 작업 진행률' : '현재 게시 작업 진행률'" />
+              <p class="infox-panel-next">{{ infoxNext }}</p>
+              <p v-if="infoxChanged" class="infox-panel-note">현재 편집본 또는 설정이 확정본과 다릅니다.</p>
+              <p v-if="infoxChanged && infoxRun" class="infox-panel-note">진행 중인 실행은 확정본 v{{ infoxRun.snapshot.revision }}을 그대로 사용합니다.</p>
+              <div v-if="infoxError" class="inline-error" role="alert">{{ infoxError }}</div>
+              <template v-if="infoxPrimary">
+                <button class="primary-button infox-primary" type="button" :disabled="infoxPrimary.disabled || infoxPrimaryBusy"
+                  :aria-describedby="infoxPrimary.hint ? 'infox-primary-hint' : undefined" @click="infoxPrimary.run()">
+                  <span>{{ infoxPrimaryBusy && infoxPrimary.busyLabel ? infoxPrimary.busyLabel : infoxPrimary.label }}</span>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5" /></svg>
+                </button>
+                <p v-if="infoxPrimary.hint" id="infox-primary-hint" class="infox-hint">{{ infoxPrimary.hint }}</p>
               </template>
-            </section>
-            <p v-if="editorUrl(infoxRun)"><a :href="editorUrl(infoxRun)!" target="_blank" rel="noopener noreferrer">InfoX 편집 화면 수동 열기</a></p>
-            <InfoXPublishing v-if="infoxRun.video_id" :key="infoxRun.id" :run="infoxRun" />
+              <div class="infox-panel-secondary">
+                <button v-if="infoxRun && infoxCurrent.key === 'produce' && runTracking(infoxRun)" type="button" class="ghost-button"
+                  @click="pollInfox(infoxRun.id)">진행 상태 다시 조회</button>
+                <a v-if="infoxRun && editorUrl(infoxRun)" class="ghost-button" :href="editorUrl(infoxRun)!" target="_blank" rel="noopener noreferrer">InfoX 편집 화면 수동 열기</a>
+              </div>
+              <p v-if="infoxEditorStatusVisible" class="infox-panel-editor" role="status">편집기 탭: {{ editorMessage }}</p>
+            </aside>
+
+            <div class="infox-steps">
+              <InfoXStep :step="infoxStep.prepare" :current="infoxCurrent.key === 'prepare'" :summary="infoxSummaries.prepare"
+                :force-open="infoxRestartable">
+                <div class="infox-fields">
+                  <label for="infox-title">InfoX 영상 제목</label>
+                  <input id="infox-title" v-model="infoxTitle" type="text" maxlength="200" :disabled="inputBusy || infoxLoading || !!infoxPending" />
+                  <details class="infox-title-settings">
+                    <summary>기본 제목 설정</summary>
+                    <div class="infox-title-settings-fields">
+                      <label for="infox-title-template">기본 제목 형식</label>
+                      <input id="infox-title-template" v-model="infoxTitleTemplateDraft" type="text" maxlength="200" aria-describedby="infox-title-template-help" :disabled="inputBusy || infoxLoading || !!infoxPending" />
+                      <p id="infox-title-template-help">MMDD는 한국 시간의 오늘 월일로 바뀝니다. 기본 형식은 이 브라우저에 저장됩니다.</p>
+                      <p v-if="infoxTitleTemplateValid">미리보기: {{ formatInfoxTitle(infoxTitleTemplateDraft) }}</p>
+                      <p v-else>비어 있지 않은 200자 이하의 제목 형식을 입력하세요.</p>
+                      <button type="button" class="ghost-button" :disabled="!infoxTitleTemplateValid || inputBusy || infoxLoading || !!infoxPending" @click="saveInfoxTitleTemplate">기본값 저장 및 현재 제목에 적용</button>
+                      <p v-if="infoxTitleTemplateError" class="inline-error" role="alert">{{ infoxTitleTemplateError }}</p>
+                      <p v-if="infoxTitleTemplateSaved" role="status">기본 제목을 저장하고 현재 제목에 적용했습니다.</p>
+                    </div>
+                  </details>
+                  <p class="infox-settings">제작 설정: 템플릿 1786 · 남/아나운서/당당 · 속도 1.0 · 목표 60초</p>
+                  <label class="transcribe-toggle">
+                    <input v-model="infoxAutoReplace" type="checkbox" :disabled="inputBusy || infoxLoading || !!infoxPending" />
+                    <span>반도체 즐겨찾기 자동 대체 사용</span>
+                  </label>
+                  <label v-if="infoxNeedsReview" class="transcribe-toggle">
+                    <input v-model="infoxReviewConfirmed" type="checkbox" :disabled="inputBusy || infoxLoading || !!infoxPending" />
+                    <span>검토 사유를 확인하고 이 대본을 사용합니다</span>
+                  </label>
+                </div>
+                <div v-if="infoxRun" class="infox-confirmed">
+                  <p><strong>{{ infoxRun.stage === 'prepared' ? '전송본이 확정되었습니다.' : '확정본으로 실행한 기록입니다.' }}</strong></p>
+                  <p>확정 대본 버전 {{ infoxRun.snapshot.revision }} · {{ infoxRun.snapshot.scenes.length }}장면 · {{ infoxRun.snapshot.settings.title }}</p>
+                  <p>자동 대체 {{ infoxRun.snapshot.settings.auto_replace ? '사용' : '사용 안 함' }}</p>
+                  <template v-if="infoxRestartable">
+                    <p>수정본으로 제작하면 새 실행을 만듭니다. 기존 실행과 영상은 변경하지 않습니다.</p>
+                    <button type="button" class="ghost-button" :disabled="!!infoxStartBlocker || inputBusy || infoxStarting"
+                      @click="beginInfoxProduction">수정본으로 새 제작 시작</button>
+                    <p v-if="infoxStartBlocker" class="infox-hint">{{ infoxStartBlocker }}</p>
+                  </template>
+                </div>
+              </InfoXStep>
+
+              <InfoXStep :step="infoxStep.produce" :current="infoxCurrent.key === 'produce'" :summary="infoxSummaries.produce">
+                <template v-if="infoxRun">
+                  <p v-if="infoxRun.tracking?.error_code" class="inline-error">{{ infoxErrorLabels[infoxRun.tracking.error_code] ?? '기존 실행을 확인하세요.' }}</p>
+                  <p v-if="infoxRun.requires_reconciliation" class="inline-error">접수 여부 확인이 필요합니다. 기존 실행은 다시 전송하지 않습니다.</p>
+                  <p v-if="infoxRun.tracking?.progress != null && infoxActiveStages.has(infoxRun.stage) && !infoxRun.tracking.completion_seen">완료 판정은 작업 이벤트와 결과 검증을 기다립니다.</p>
+                  <ul v-if="infoxAssets" class="infox-counts" aria-label="에셋 검사·교체 요약">
+                    <li><strong>{{ infoxAssets.detected }}</strong>기업명 검출</li>
+                    <li><strong>{{ infoxAssets.unknown }}</strong>확인 불가</li>
+                    <li><strong>{{ infoxAssets.replacements ?? '-' }}</strong>교체 대상</li>
+                    <li><strong>{{ infoxAssets.notDetected + infoxAssets.exempt }}</strong>미검출·예외</li>
+                  </ul>
+                  <p v-if="infoxAssets && !infoxAssets.audited">배정 에셋 검사 중입니다.</p>
+                  <p v-if="infoxAssets?.unknown">확인 불가 {{ infoxAssets.unknown }}개는 교체 대상에서 제외하고 진행을 막지 않습니다.</p>
+                  <p v-if="!infoxRun.snapshot.settings.auto_replace">이 전송본은 자동 대체를 사용하지 않습니다.</p>
+                  <InfoXAssetSave v-if="infoxRun.asset_save" :save="infoxRun.asset_save" />
+                  <div v-if="infoxSecondary.length" class="infox-actions">
+                    <button v-for="action in infoxSecondary" :key="action.key" type="button" class="ghost-button"
+                      :disabled="action.disabled" @click="action.run()">{{ action.label }}</button>
+                  </div>
+                  <details v-if="infoxRun.asset_audit?.state && infoxRun.asset_audit.state !== 'not_started' || infoxRun.replacement_plan?.state && infoxRun.replacement_plan.state !== 'not_started'" class="infox-disclosure">
+                    <summary>장면별 검사·교체 근거</summary>
+                    <InfoXAssetAudit v-if="infoxRun.asset_audit" :audit="infoxRun.asset_audit" :save-started="!!infoxRun.asset_save && infoxRun.asset_save.state !== 'not_started'" />
+                    <InfoXReplacementPlan v-if="infoxRun.replacement_plan" :plan="infoxRun.replacement_plan" :save-started="!!infoxRun.asset_save && infoxRun.asset_save.state !== 'not_started'" />
+                  </details>
+                  <details class="infox-disclosure">
+                    <summary>처리 기록과 식별 정보</summary>
+                    <p v-if="infoxRun.video_id">영상 ID: {{ infoxRun.video_id }} · 작업 ID: {{ infoxRun.task_id ?? '접수 확인 전' }}</p>
+                    <p v-else>영상 ID 확보 전입니다.</p>
+                    <p>실행 기록 버전 {{ infoxRun.version }} · 진행 방식 {{ infoxRun.continuation === 'automatic' ? '자동' : '수동' }}</p>
+                    <p v-if="infoxRun.tracking">작업 상태 {{ infoxRun.tracking.task_status }}<template v-if="infoxRun.tracking.reconnects"> · 재연결 {{ infoxRun.tracking.reconnects }}회</template></p>
+                    <p v-if="infoxAssets?.saveLabel && infoxRun.asset_save?.verified_version">검증한 서버 버전: {{ infoxRun.asset_save.verified_version }}</p>
+                  </details>
+                </template>
+              </InfoXStep>
+
+              <InfoXStep :step="infoxStep.publish" :current="infoxCurrent.key === 'publish'" :summary="infoxSummaries.publish">
+                <template v-if="infoxRun?.video_id">
+                  <section class="infox-editor" aria-label="편집기 브라우저 이동">
+                    <h5>InfoX 편집기</h5>
+                    <p>편집기에서 장면·자막을 확인하고 저장하세요. 저장한 최신 편집본으로 렌더합니다.</p>
+                    <div class="infox-actions">
+                      <button v-if="editorEligible(infoxRun)" type="button" class="ghost-button" :disabled="editorBusy" @click="reopenEditor">편집기 다시 열기</button>
+                      <template v-if="editorAttempt && ['navigation_requested', 'login_required', 'ready_reported'].includes(editorAttempt.state)">
+                        <button type="button" class="ghost-button" :disabled="editorBusy" @click="editorNavigation.report('login_required')">로그인 필요 상태 기록</button>
+                        <button type="button" class="ghost-button" :disabled="editorBusy" @click="editorNavigation.report('failed')">이동 실패 상태 기록</button>
+                        <button type="button" class="ghost-button" :disabled="editorBusy" @click="editorNavigation.report('ready_reported')">편집기 준비 사용자 확인</button>
+                      </template>
+                    </div>
+                    <p v-if="!infoxEditorStatusVisible">브라우저 이동 기록이 없습니다. 편집기 다시 열기 또는 수동 링크를 사용하세요.</p>
+                  </section>
+                  <InfoXPublishing :run="infoxRun" :control="publishing" />
+                  <div v-if="['failed', 'needs_attention'].includes(publishing.record.value?.stage ?? '') && !publishing.preparing.value" class="infox-actions">
+                    <button type="button" class="ghost-button" :disabled="!publishing.canPrepare.value || !infoxEditorReady" @click="publishing.prepareNew()">새 회차 렌더·업로드 준비</button>
+                  </div>
+                </template>
+              </InfoXStep>
+
+              <InfoXStep :step="infoxStep.complete" :current="infoxCurrent.key === 'complete'" :summary="infoxSummaries.complete">
+                <template v-if="publishing.record.value?.uploaded_verified">
+                  <p>InfoX의 해당 업로드 작업 결과와 일부공개 기록을 확인했습니다.</p>
+                  <p v-if="publishing.record.value.share_url" class="infox-link">
+                    <a :href="publishing.record.value.share_url" target="_blank" rel="noopener noreferrer">{{ publishing.record.value.share_url }}</a>
+                  </p>
+                  <p v-if="publishing.record.value.stage === 'completed'">링크를 클립보드에 복사했습니다.</p>
+                  <p v-else-if="publishing.record.value.stage === 'clipboard_failed'" class="inline-error">링크 복사에 실패했습니다. 업로드 결과와 링크는 보존되어 있습니다.</p>
+                  <div v-if="!publishing.preparing.value" class="infox-actions">
+                    <button type="button" class="ghost-button" :disabled="!publishing.canPrepare.value || !infoxEditorReady" @click="publishing.prepareNew()">새 회차 렌더·업로드 준비</button>
+                  </div>
+                </template>
+              </InfoXStep>
+            </div>
           </div>
         </section>
       </section>

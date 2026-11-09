@@ -97,8 +97,14 @@ def scenario(playwright, root, mode):
             context.add_init_script(f"sessionStorage.setItem('market-compressor.job-id','{run.snapshot.job_id}')")
             page=context.new_page(); page.on('pageerror',lambda error:errors.append(str(error)))
             page.goto(url,wait_until='networkidle')
-            panel=page.get_by_role('region',name='렌더 및 유튜브 업로드',exact=True)
-            button=panel.get_by_role('button',name='편집 완료 · 렌더 및 유튜브 업로드',exact=True)
+            expect(page.get_by_role('region',name='렌더 및 유튜브 업로드',exact=True)).to_be_visible()
+            # A finished step is folded, so read the publishing record without role/visibility filters.
+            panel=page.locator('section.infox-publishing')
+            status=panel.locator('[role="status"]')
+            # Current state and the single primary action live in the side panel.
+            side=page.get_by_role('complementary',name='InfoX 현재 상태와 다음 행동',exact=True)
+            headline=side.locator('.infox-panel-headline')
+            button=side.get_by_role('button',name='편집 완료 · 렌더 및 유튜브 업로드',exact=True)
             expect(button).to_be_enabled()
             panel.get_by_label('게시 기준일').fill('2026-11-04')
             other=None
@@ -107,7 +113,7 @@ def scenario(playwright, root, mode):
                 expect(other.get_by_role('button',name='편집 완료 · 렌더 및 유튜브 업로드',exact=True)).to_be_enabled()
             button.click()
             if mode in ('duplicate','reload','restart'):
-                expect(panel.get_by_role('progressbar')).to_have_attribute('value','42',timeout=10000)
+                expect(side.get_by_role('progressbar')).to_have_attribute('value','42',timeout=10000)
                 if other:
                     other.get_by_role('button',name='편집 완료 · 렌더 및 유튜브 업로드',exact=True).click()
                     expect(other.get_by_label('게시 기준일')).to_have_value('2026-11-04')
@@ -121,19 +127,23 @@ def scenario(playwright, root, mode):
                     page.reload(wait_until='networkidle')
                 gate.set()
             if mode=='clipboard_failure':
-                expect(panel.get_by_text('업로드 완료 · 링크 복사 실패',exact=True)).to_be_visible(timeout=15000)
+                expect(headline).to_have_text('업로드 완료 · 링크 복사 필요',timeout=15000)
+                expect(status).to_have_text('업로드 완료 · 링크 복사 실패')
+                expect(page.get_by_role('link',name='https://youtu.be/abcdefghijk')).to_be_visible()
                 before=list(fake.calls); clipboard.fail=False
-                panel.get_by_role('button',name='링크 다시 복사',exact=True).click()
-                expect(panel.get_by_text('업로드 완료 · 링크 복사 완료',exact=True)).to_be_visible()
+                side.get_by_role('button',name='링크 다시 복사',exact=True).click()
+                expect(headline).to_have_text('게시 완료 · 링크 확인 가능')
+                expect(status).to_have_text('업로드 완료 · 링크 복사 완료')
                 assert before==fake.calls
             elif mode.startswith('failure_') or mode in ('lost_ack','restart'):
-                expect(panel.get_by_role('status')).to_contain_text('게시',timeout=15000)
-                expect(panel.get_by_role('status')).to_have_text(
+                expect(status).to_contain_text('게시',timeout=15000)
+                expect(status).to_have_text(
                     '게시 실패' if mode.startswith('failure_') and mode!='failure_metadata_update' else '게시 확인 필요',timeout=15000)
                 assert not clipboard.values
             else:
-                expect(panel.get_by_text('업로드 완료 · 링크 복사 완료',exact=True)).to_be_visible(timeout=15000)
-                expect(panel.get_by_role('link',name='https://youtu.be/abcdefghijk')).to_be_visible()
+                expect(status).to_have_text('업로드 완료 · 링크 복사 완료',timeout=15000)
+                expect(headline).to_have_text('게시 완료 · 링크 확인 가능')
+                expect(page.get_by_role('link',name='https://youtu.be/abcdefghijk')).to_be_visible()
                 assert clipboard.values==['https://youtu.be/abcdefghijk']
             if mode.startswith('rerender'):
                 first_calls=list(fake.calls)
@@ -148,7 +158,7 @@ def scenario(playwright, root, mode):
                             while not gate.is_set(): await asyncio.sleep(.02)
                         return await read(video_id)
                     fake.render_logs=second_gated
-                panel.get_by_role('button',name='새 회차 렌더·업로드 준비',exact=True).click()
+                page.get_by_role('button',name='새 회차 렌더·업로드 준비',exact=True).click()
                 expect(button).to_be_enabled()
                 expect(panel.get_by_label('게시 기준일')).to_have_value('2026-11-04')
                 panel.get_by_label('게시 기준일').fill('2026-11-03')
@@ -159,11 +169,13 @@ def scenario(playwright, root, mode):
                     expect(other_button).to_be_enabled()
                 button.click()
                 if mode=='rerender_duplicate':
-                    expect(panel.get_by_role('progressbar')).to_have_attribute('value','42')
-                    other_button.click();expect(other_button).to_be_disabled();gate.set()
-                expect(panel.get_by_role('status')).to_have_text('업로드 완료 · 링크 복사 완료',timeout=15000)
-                expect(panel.get_by_role('link',name='https://youtu.be/ZYXWVUTSRQP')).to_be_visible()
+                    expect(side.get_by_role('progressbar')).to_have_attribute('value','42')
+                    other_button.click();gate.set()
+                expect(status).to_have_text('업로드 완료 · 링크 복사 완료',timeout=15000)
+                if mode=='rerender_duplicate': expect(other_button).to_have_count(0,timeout=15000)
+                expect(page.get_by_role('link',name='https://youtu.be/ZYXWVUTSRQP')).to_be_visible()
                 expect(panel.get_by_label('게시 기준일')).to_have_value('2026-11-03')
+                page.get_by_role('button',name='펼치기 편집 및 게시',exact=True).click()
                 panel.get_by_text('이전 게시 회차 (1)',exact=True).click()
                 expect(panel.get_by_role('link',name='https://youtu.be/abcdefghijk')).to_be_visible()
                 assert first_calls==fake.calls==['render','metadata_generate','metadata_update','upload']
@@ -174,11 +186,11 @@ def scenario(playwright, root, mode):
                 assert fake.calls==before and clipboard.values==copies and len(posts)==postcount
                 assert not unexpected and not errors,(unexpected,errors)
                 images=root/'work/rerender';images.mkdir(parents=True,exist_ok=True)
-                panel.screenshot(path=str(images/f'{mode}.png'))
+                page.locator('.infox-preparation').screenshot(path=str(images/f'{mode}.png'))
                 return
             expect(panel.get_by_label('게시 기준일')).to_have_value('2026-11-04')
             expect(panel.get_by_label('게시 기준일')).to_be_disabled()
-            expect(button).to_be_disabled()
+            expect(button).to_have_count(0)
             before=list(fake.calls); copies=list(clipboard.values); postcount=len(posts)
             page.reload(wait_until='networkidle')
             expect(panel.get_by_label('게시 기준일')).to_have_value('2026-11-04')
@@ -190,7 +202,7 @@ def scenario(playwright, root, mode):
             assert not unexpected and not errors,(unexpected,errors)
             if mode=='success':
                 images=root/'work/first-publish'; images.mkdir(parents=True,exist_ok=True)
-                panel.screenshot(path=str(images/'publish-panel.png'))
+                page.locator('.infox-preparation').screenshot(path=str(images/'publish-panel.png'))
         finally:
             gate.set()
             if browser: browser.close()
