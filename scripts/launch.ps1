@@ -3,6 +3,7 @@ param(
     [switch]$NoBrowser,
     [switch]$NoDialog,
     [switch]$Stop,
+    [switch]$Toggle,
     [switch]$InstallOnly
 )
 
@@ -584,6 +585,25 @@ function Stop-AppServer {
     throw "앱 서버가 제한 시간 안에 종료되지 않았습니다. 상태 기록을 보존했습니다: $script:StatePath"
 }
 
+function Toggle-AppServer {
+    $state = Get-ServerState
+    if (Test-VerifiedState $state) {
+        Stop-AppServer
+        return
+    }
+    if ($state -and (Test-RecordedLauncherProcess $state)) {
+        $waitResult = Wait-RecordedServer $state 30
+        if ($waitResult -eq 'ready') {
+            Stop-AppServer
+            return
+        }
+        if ($waitResult -eq 'timeout') {
+            throw "앱 서버가 아직 시작 중입니다. 상태 기록을 보존했습니다. 준비 완료 후 toggle.cmd를 다시 실행하세요: $script:StatePath"
+        }
+    }
+    Start-AppServer
+}
+
 function Start-AppServer {
     $state = Get-ServerState
     if (Test-VerifiedState $state) {
@@ -675,6 +695,9 @@ try {
     if ($Stop -and $InstallOnly) {
         throw 'Stop과 InstallOnly는 함께 사용할 수 없습니다.'
     }
+    if ($Toggle -and ($Stop -or $InstallOnly)) {
+        throw 'Toggle은 Stop 또는 InstallOnly와 함께 사용할 수 없습니다.'
+    }
     if ($InstallOnly) {
         Write-Output 'Python 런타임과 가상 환경, 필수 패키지를 확인합니다...'
         $installedPython = Ensure-PythonEnvironment
@@ -685,6 +708,9 @@ try {
         Write-Output "Node.js 준비 완료: $installedNode"
         Write-LauncherLog '의존성 설치/확인 완료 (설치 전용 모드)'
         Write-Output '설치가 완료되었습니다. start.cmd로 앱을 실행하세요.'
+    }
+    elseif ($Toggle) {
+        Toggle-AppServer
     }
     elseif ($Stop) {
         Stop-AppServer

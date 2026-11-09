@@ -209,8 +209,9 @@ describe('InfoX 단계형 화면', { timeout: 15000 }, () => {
     uploaded_verified: true, youtube_video_id: 'abcdefghijk', share_url: 'https://youtu.be/abcdefghijk', clipboard_state: 'copied', ...overrides })
 
   function installReady(latest: unknown, preview = { available: true, charged: true, can_start: true, blocked_reason: null,
-    latest_publication_id: null, has_remote_render: false }) {
+    latest_publication_id: null, has_remote_render: false }, downloads: unknown[] = []) {
     return install((p, init) => {
+      if (p === '/api/infox-publications/pub-1/downloads') return json({ downloads })
       if (p === '/api/jobs/job-1/infox-runs') return json({ run: ready })
       if (p.endsWith('/editor-attempts')) return json({ attempt: null })
       if (p.endsWith('/publications/history')) return json({ publications: latest ? [latest] : [] })
@@ -219,7 +220,7 @@ describe('InfoX 단계형 화면', { timeout: 15000 }, () => {
         if (init.method === 'POST') return json(publication({ stage: 'rendering', progress: 42, uploaded_verified: false, share_url: null }), 202)
         return json({ publication: latest })
       }
-      if (p === '/api/infox-publications/pub-1') return json(publication({ stage: 'rendering', progress: 42, uploaded_verified: false, share_url: null }))
+      if (p === '/api/infox-publications/pub-1') return json(latest ?? publication({ stage: 'rendering', progress: 42, uploaded_verified: false, share_url: null }))
       if (p === '/api/jobs/job-1') return json(makeJob())
       throw new Error(`unexpected ${p}`)
     })
@@ -275,5 +276,31 @@ describe('InfoX 단계형 화면', { timeout: 15000 }, () => {
     const button = await within(panel).findByRole('button', { name: '편집 완료 · 렌더 및 유튜브 업로드' })
     await waitFor(() => expect(button).toHaveAccessibleDescription('이 영상에 진행 중인 작업이 있습니다. 완료 후 다시 준비하세요.'))
     expect(button).toBeDisabled()
+  })
+  const download = (overrides: Record<string, unknown> = {}) => ({ id: 'download-1', publication_id: 'pub-1', kind: 'all', automatic: false,
+    state: 'partial', error_code: null, items: [
+      { kind: 'script', filename: '261109_대본.txt', state: 'completed', path: 'C:/Downloads/261109_대본.txt', size: 10, sha256: 'h', error_code: null },
+      { kind: 'video', filename: '261109_영상시황.mp4', state: 'failed', path: null, size: null, sha256: null, error_code: 'timeout' }], ...overrides })
+
+  it('완료 단계에 현재 회차의 파일 저장 결과와 실패 파일 재다운로드를 한 곳에만 표시한다', async () => {
+    const { posts } = installReady(publication(), undefined, [download()])
+    render(App)
+    expect(await screen.findByText('일부 다운로드 완료')).toBeVisible()
+    expect(screen.getAllByRole('region', { name: '파일 다운로드', hidden: true })).toHaveLength(1)
+    expect(screen.getByText('261109_영상시황.mp4 · 저장 실패')).toBeVisible()
+    expect(screen.getByRole('button', { name: '실패 파일 다시 다운로드' })).toBeVisible()
+    expect(screen.getByRole('button', { name: '대본·원본·영상 3개 파일 다운로드' })).toBeVisible()
+    expect(posts).toHaveLength(0)
+  })
+
+  it('게시가 끝나기 전에는 자동 저장 영상 결과를 편집 및 게시 단계에서 보여준다', async () => {
+    const rendering = publication({ stage: 'uploading', progress: 10, uploaded_verified: false, share_url: null })
+    installReady(rendering, undefined, [download({ kind: 'video', automatic: true, state: 'completed', items: [
+      { kind: 'video', filename: '261109_영상시황.mp4', state: 'completed', path: 'C:/Downloads/261109_영상시황.mp4', size: 99, sha256: 'h', error_code: null }] })])
+    render(App)
+    expect(await screen.findByText('렌더 완료 영상 자동 다운로드')).toBeVisible()
+    expect(screen.getAllByRole('region', { name: '파일 다운로드', hidden: true })).toHaveLength(1)
+    expect(screen.getByRole('region', { name: '편집 및 게시' })).toContainElement(screen.getByRole('region', { name: '파일 다운로드' }))
+    expect(screen.queryByRole('button', { name: '대본·원본·영상 3개 파일 다운로드' })).not.toBeInTheDocument()
   })
 })

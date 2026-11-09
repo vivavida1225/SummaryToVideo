@@ -62,6 +62,8 @@ def scenario(playwright, root, mode):
             app=create_app(Settings(project),clipboard=clipboard)
             app.state.infox_publications.client_factory=lambda:fake
             app.state.infox_publications.poll_interval=.01
+            # Never touch the user's real Downloads folder from this controlled scenario.
+            app.state.infox_downloads.folder_provider=lambda:(project/'downloads').mkdir(exist_ok=True) or project/'downloads'
             app.state.manager.store.metadata(dict(id=run.snapshot.job_id,parent_id=None,state='completed',source='clipboard',
                 created_at='2026-11-04T00:00:00Z',elapsed_seconds=1,attempt=1,max_attempts=1,key_number=None,retry_at=None,
                 serialized='통제 원문',compressed=run.snapshot.text,scene_count=len(run.snapshot.scenes),body_char_count=20,
@@ -100,7 +102,7 @@ def scenario(playwright, root, mode):
             expect(page.get_by_role('region',name='렌더 및 유튜브 업로드',exact=True)).to_be_visible()
             # A finished step is folded, so read the publishing record without role/visibility filters.
             panel=page.locator('section.infox-publishing')
-            status=panel.locator('[role="status"]')
+            status=panel.locator('.infox-publish-status [role="status"]')
             # Current state and the single primary action live in the side panel.
             side=page.get_by_role('complementary',name='InfoX 현재 상태와 다음 행동',exact=True)
             headline=side.locator('.infox-panel-headline')

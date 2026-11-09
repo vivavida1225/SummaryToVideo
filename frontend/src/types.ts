@@ -150,6 +150,24 @@ export interface PublicationRecord {
   share_url: string | null
   clipboard_state: string
 }
+export interface DownloadItem {
+  kind: 'script' | 'source' | 'video'
+  filename: string
+  state: 'pending' | 'downloading' | 'completed' | 'failed'
+  path: string | null
+  size: number | null
+  sha256: string | null
+  error_code: string | null
+}
+export interface DownloadRecord {
+  id: string
+  publication_id: string
+  kind: 'video' | 'all'
+  automatic: boolean
+  state: 'pending' | 'running' | 'completed' | 'partial' | 'failed' | 'needs_attention'
+  items: DownloadItem[]
+  error_code: string | null
+}
 export interface PublishInput { intent_id: string; market_date: string }
 export interface RerenderInput extends PublishInput { previous_publication_id: string }
 export interface PublishCharge {

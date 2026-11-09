@@ -8,6 +8,7 @@ import InfoXAssetAudit from './components/InfoXAssetAudit.vue'
 import InfoXAssetSave from './components/InfoXAssetSave.vue'
 import InfoXReplacementPlan from './components/InfoXReplacementPlan.vue'
 import InfoXProgress from './components/InfoXProgress.vue'
+import InfoXDownloads from './components/InfoXDownloads.vue'
 import InfoXPublishing from './components/InfoXPublishing.vue'
 import InfoXStep from './components/InfoXStep.vue'
 import { EditorNavigation, editorEligible, editorUrl } from './infoxEditor'
@@ -1274,6 +1275,9 @@ const infoxEditorStatusVisible = computed(() => !!editorAttempt.value || !!edito
                     <p v-if="!infoxEditorStatusVisible">브라우저 이동 기록이 없습니다. 편집기 다시 열기 또는 수동 링크를 사용하세요.</p>
                   </section>
                   <InfoXPublishing :run="infoxRun" :control="publishing" />
+                  <!-- The current attempt's files appear in exactly one step, so polling and saved intents are never doubled. -->
+                  <InfoXDownloads v-if="publishing.record.value && infoxStep.complete.status === 'waiting'" :key="publishing.record.value.id"
+                    :publication-id="publishing.record.value.id" :uploaded-verified="publishing.record.value.uploaded_verified" />
                   <div v-if="['failed', 'needs_attention'].includes(publishing.record.value?.stage ?? '') && !publishing.preparing.value" class="infox-actions">
                     <button type="button" class="ghost-button" :disabled="!publishing.canPrepare.value || !infoxEditorReady" @click="publishing.prepareNew()">새 회차 렌더·업로드 준비</button>
                   </div>
@@ -1288,6 +1292,8 @@ const infoxEditorStatusVisible = computed(() => !!editorAttempt.value || !!edito
                   </p>
                   <p v-if="publishing.record.value.stage === 'completed'">링크를 클립보드에 복사했습니다.</p>
                   <p v-else-if="publishing.record.value.stage === 'clipboard_failed'" class="inline-error">링크 복사에 실패했습니다. 업로드 결과와 링크는 보존되어 있습니다.</p>
+                  <InfoXDownloads v-if="infoxStep.complete.status !== 'waiting'" :key="publishing.record.value.id"
+                    :publication-id="publishing.record.value.id" :uploaded-verified="publishing.record.value.uploaded_verified" />
                   <div v-if="!publishing.preparing.value" class="infox-actions">
                     <button type="button" class="ghost-button" :disabled="!publishing.canPrepare.value || !infoxEditorReady" @click="publishing.prepareNew()">새 회차 렌더·업로드 준비</button>
                   </div>

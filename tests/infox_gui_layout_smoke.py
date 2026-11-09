@@ -69,6 +69,16 @@ SCENARIOS = {
                   'history': [publication(2, 'https://youtu.be/ZYXWVUTSRQP', '2026-11-09'), publication(1, 'https://youtu.be/abcdefghijk', '2026-11-08')]},
     'editor_ready': {'publication': None, 'history': []},
 }
+def downloads(publication_id, day):
+    items = [{'kind': kind, 'filename': f'{day}_{name}', 'state': 'completed', 'path': f'C:/Users/user/Downloads/{day}_{name}',
+              'size': 1000, 'sha256': 'h', 'error_code': None}
+             for kind, name in (('script', '대본.txt'), ('source', '원본데이터.txt'), ('video', '영상시황.mp4'))]
+    return [{'id': f'{publication_id}-all', 'publication_id': publication_id, 'kind': 'all', 'automatic': False,
+             'state': 'completed', 'items': items, 'error_code': None},
+            {'id': f'{publication_id}-auto', 'publication_id': publication_id, 'kind': 'video', 'automatic': True,
+             'state': 'completed', 'items': items[2:], 'error_code': None}]
+
+
 PREVIEW = {'available': True, 'charged': True, 'credits': 3, 'duration_seconds': 61, 'can_start': True,
            'blocked_reason': None, 'latest_publication_id': None, 'has_remote_render': False}
 
@@ -104,6 +114,8 @@ def open_page(browser, url, scenario, width, height, problems):
             f'/api/infox-runs/{RUN_ID}/publications': {'publication': data['publication']},
             f'/api/infox-runs/{RUN_ID}/publications/history': {'publications': data['history']},
             f'/api/infox-runs/{RUN_ID}/publications/preview': PREVIEW,
+            '/api/infox-publications/pub-2/downloads': {'downloads': downloads('pub-2', '261109')},
+            '/api/infox-publications/pub-1/downloads': {'downloads': downloads('pub-1', '261108')},
         }.get(path)
         if body is None:
             problems.append(f'unknown GET {path}'); return route.fulfill(status=404, json={'detail': 'not found'})

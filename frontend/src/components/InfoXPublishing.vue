@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import InfoXDownloads from './InfoXDownloads.vue'
 import { editorEligible } from '../infoxEditor'
 import { PublishingControl, formatPublishMetadata, publishStages, publishErrors } from '../infoxPublishing'
 import type { InfoXRun } from '../types'
@@ -59,6 +60,7 @@ const chargeLabel = computed(() => !charge.value?.available ? '확인 중 또는
           <p>{{ item.attempt_number }}회차 · {{ item.snapshot.market_date }} · {{ publishStages[item.stage] ?? '상태 확인 필요' }}</p>
           <p v-if="item.created_at"><time :datetime="item.created_at">{{ new Date(item.created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) }}</time></p>
           <a v-if="item.uploaded_verified && item.share_url" :href="item.share_url" target="_blank" rel="noopener noreferrer">{{ item.share_url }}</a>
+          <InfoXDownloads :key="item.id" :publication-id="item.id" :uploaded-verified="item.uploaded_verified" />
         </li>
       </ul>
     </details>
