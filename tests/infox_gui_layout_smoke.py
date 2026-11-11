@@ -114,6 +114,7 @@ def open_page(browser, url, scenario, width, height, problems):
             f'/api/infox-runs/{RUN_ID}/publications': {'publication': data['publication']},
             f'/api/infox-runs/{RUN_ID}/publications/history': {'publications': data['history']},
             f'/api/infox-runs/{RUN_ID}/publications/preview': PREVIEW,
+            '/api/infox-publications/pub-2': data['publication'],
             '/api/infox-publications/pub-2/downloads': {'downloads': downloads('pub-2', '261109')},
             '/api/infox-publications/pub-1/downloads': {'downloads': downloads('pub-1', '261108')},
         }.get(path)

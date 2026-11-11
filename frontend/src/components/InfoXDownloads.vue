@@ -10,11 +10,11 @@ const busy = ref(false)
 const uncertain = ref(false)
 const error = ref('')
 const notice = ref('')
-const active = computed(() => records.value.some(r => ['pending','running'].includes(r.state)))
+const active = computed(() => records.value.some(r => ['queued','pending','running'].includes(r.state)))
 const latest = computed(() => records.value[0])
 const automatic = computed(() => records.value.find(r => r.automatic && r.id !== latest.value?.id))
 const shown = computed(() => [latest.value,automatic.value].filter((r): r is DownloadRecord => !!r))
-const states: Record<string,string> = {pending:'다운로드 준비 중',running:'다운로드 중',completed:'다운로드 완료',
+const states: Record<string,string> = {queued:'진행 중인 파일 다운로드 완료 대기',pending:'다운로드 준비 중',running:'다운로드 중',completed:'다운로드 완료',
   partial:'일부 다운로드 완료',failed:'다운로드 실패',needs_attention:'다운로드 확인 필요'}
 const itemStates: Record<string,string> = {pending:'대기',downloading:'저장 중',completed:'저장 완료',failed:'저장 실패'}
 const errors: Record<string,string> = {timeout:'전송 시간이 초과되었습니다.',network_error:'다운로드 연결이 끊겼습니다.',
@@ -112,7 +112,7 @@ async function save(retry?: DownloadRecord, replay = false) {
       <button type="button" class="ghost-button" :disabled="loading || busy" @click="save(undefined,true)">다운로드 접수 다시 확인</button>
     </template>
     <div v-for="record in shown" :key="record.id" aria-live="polite">
-      <p v-if="record.automatic">렌더 완료 영상 자동 다운로드</p>
+      <p v-if="record.automatic">{{ record.kind === 'all' ? '렌더 완료 대본·원본·영상 자동 다운로드' : '렌더 완료 영상 자동 다운로드' }}</p>
       <p role="status">{{ states[record.state] }}</p>
       <p v-if="record.error_code">{{ errors[record.error_code] ?? '파일 저장에 실패했습니다. 다시 다운로드하세요.' }}</p>
       <ul>
@@ -122,7 +122,7 @@ async function save(retry?: DownloadRecord, replay = false) {
           <p v-if="item.error_code">{{ errors[item.error_code] ?? '파일 저장에 실패했습니다. 다시 다운로드하세요.' }}</p>
         </li>
       </ul>
-      <button v-if="!['pending','running'].includes(record.state)" type="button" class="ghost-button"
+      <button v-if="!['queued','pending','running'].includes(record.state)" type="button" class="ghost-button"
         :disabled="loading || busy || active || uncertain" @click="save(record)">
         {{ record.state === 'completed' ? '파일 확인·다시 다운로드' : '실패 파일 다시 다운로드' }}
       </button>

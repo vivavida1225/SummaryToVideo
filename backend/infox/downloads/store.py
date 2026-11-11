@@ -3,7 +3,17 @@ from datetime import date
 from uuid import UUID, uuid4
 
 from ..run_models import RunError, now
-from .models import ACTIVE, DownloadItem, DownloadRecord
+from .models import DownloadItem, DownloadRecord
+
+
+def ensure_ready(pub, kind, *, automatic=False, retry=None):
+    if retry is not None and (retry.publication_id != pub.id or retry.kind != kind):
+        raise RunError('download_not_ready')
+    origin = automatic or bool(retry and (retry.automatic or retry.automatic_origin))
+    if (not pub.render_task_id or not pub.render_file_fingerprint
+            or (kind == 'all' and not pub.uploaded_verified and not origin)):
+        raise RunError('download_not_ready')
+    return origin
 
 
 class DownloadStore:
@@ -39,6 +49,13 @@ class DownloadStore:
         intent_id = UUID(intent_id).hex
         digest = json.dumps([publication_id, kind, retry_of], separators=(',', ':'))
         with self.runs._transaction() as conn:
+            from ..publishing.models import PublicationRecord
+            pub_row = conn.execute('SELECT record FROM publications WHERE id=?',(publication_id,)).fetchone()
+            if pub_row is None:
+                raise RunError('publication_not_found',404)
+            pub = PublicationRecord.model_validate_json(pub_row['record'])
+            retry = self._decode(conn.execute('SELECT record FROM infox_downloads WHERE id=?',(retry_of,)).fetchone()) if retry_of else None
+            origin = ensure_ready(pub,kind,automatic=automatic,retry=retry)
             alias = conn.execute('SELECT digest,download_id FROM infox_download_intents WHERE intent_id=?', (intent_id,)).fetchone()
             if alias:
                 if alias['digest'] != digest:
@@ -46,23 +63,21 @@ class DownloadStore:
                 return self._decode(conn.execute('SELECT record FROM infox_downloads WHERE id=?', (alias['download_id'],)).fetchone()), False
             existing = conn.execute('SELECT record FROM infox_downloads WHERE publication_id=? AND '
                 '(active=1 OR (automatic=1 AND ?=1)) ORDER BY rowid DESC LIMIT 1', (publication_id, int(automatic))).fetchone()
-            if existing:
-                record, created = self._decode(existing), False
+            existing = self._decode(existing) if existing else None
+            queued = bool(automatic and existing and not existing.automatic)
+            if existing and not queued:
+                record, created = existing, False
             else:
-                from ..publishing.models import PublicationRecord
-                pub = PublicationRecord.model_validate_json(conn.execute(
-                    'SELECT record FROM publications WHERE id=?', (publication_id,)).fetchone()['record'])
-                if not pub.render_task_id or not pub.render_file_fingerprint or (kind == 'all' and not pub.uploaded_verified):
-                    raise RunError('download_not_ready')
                 prefix = date.fromisoformat(pub.snapshot.market_date).strftime('%y%m%d')
                 kinds = ('script', 'source', 'video') if kind == 'all' else ('video',)
                 names = {'script':'대본.txt', 'source':'원본데이터.txt', 'video':'영상시황.mp4'}
                 stamp = now()
                 record = DownloadRecord(id=uuid4().hex, publication_id=publication_id, kind=kind,
-                    automatic=automatic, created_at=stamp, updated_at=stamp,
+                    automatic=automatic, automatic_origin=origin, created_at=stamp, updated_at=stamp,
+                    state='queued' if queued else 'pending',
                     items=tuple(DownloadItem(kind=k, filename=f'{prefix}_{names[k]}') for k in kinds))
                 conn.execute('INSERT INTO infox_downloads VALUES (?,?,?,?,?)',
-                    (record.id, publication_id, int(automatic), 1, record.model_dump_json()))
+                    (record.id, publication_id, int(automatic), int(not queued), record.model_dump_json()))
                 created = True
             conn.execute('INSERT INTO infox_download_intents VALUES (?,?,?)', (intent_id, digest, record.id))
             return record, created
@@ -73,9 +88,23 @@ class DownloadStore:
             updated = DownloadRecord.model_validate({**record.model_dump(), **changes,
                 'version':record.version+1, 'updated_at':now()})
             conn.execute('UPDATE infox_downloads SET active=?,record=? WHERE id=?',
-                (int(updated.state in ACTIVE), updated.model_dump_json(), id))
+                (int(updated.state in ('pending','running')), updated.model_dump_json(), id))
             return updated
+
+    def activate_queued(self, id):
+        """Atomically claim a waiting automatic operation across database owners."""
+        with self.runs._transaction() as conn:
+            record = self._decode(conn.execute('SELECT record FROM infox_downloads WHERE id=?',(id,)).fetchone())
+            if record.state != 'queued':
+                return None
+            if conn.execute('SELECT 1 FROM infox_downloads WHERE publication_id=? AND active=1',
+                            (record.publication_id,)).fetchone():
+                return False
+            record = record.model_copy(update={'state':'pending','version':record.version+1,'updated_at':now()})
+            conn.execute('UPDATE infox_downloads SET active=1,record=? WHERE id=?',(record.model_dump_json(),id))
+            return True
 
     def interrupted(self):
         with self.runs._transaction() as conn:
-            return [self._decode(row) for row in conn.execute('SELECT record FROM infox_downloads WHERE active=1')]
+            return [self._decode(row) for row in conn.execute(
+                "SELECT record FROM infox_downloads WHERE active=1 OR json_extract(record,'$.state')='queued'")]

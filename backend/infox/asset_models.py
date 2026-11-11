@@ -86,7 +86,7 @@ class FavoriteReplacement(AuditModel):
     item_index: int | None = Field(default=None, ge=0)
     reference: AssetReference
     source: Literal['video', 'uservideo']
-    search: Literal['반도체']
+    search: Literal['반도체', '중국 대만 반도체']
     favorites_only: Literal[True]
     saved_verified: Literal[True]
     verified_at: str

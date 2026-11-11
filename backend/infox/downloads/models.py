@@ -5,7 +5,7 @@ from pydantic import Field, field_validator
 
 from ..run_models import StrictModel
 
-ACTIVE = {'pending', 'running'}
+ACTIVE = {'queued', 'pending', 'running'}
 
 
 class RetryInput(StrictModel):
@@ -36,7 +36,8 @@ class DownloadRecord(StrictModel):
     publication_id: str
     kind: Literal['video', 'all']
     automatic: bool = False
-    state: Literal['pending', 'running', 'completed', 'partial', 'failed', 'needs_attention'] = 'pending'
+    automatic_origin: bool = False
+    state: Literal['queued', 'pending', 'running', 'completed', 'partial', 'failed', 'needs_attention'] = 'pending'
     created_at: str
     updated_at: str
     items: tuple[DownloadItem, ...]

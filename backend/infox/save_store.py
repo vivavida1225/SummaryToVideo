@@ -4,6 +4,7 @@ import math
 from datetime import datetime
 
 from .asset_models import AssetReference, FavoriteReplacement
+from .sequences import choice_clips
 from .run_models import RunError, now
 from .save_models import AssetSave, remote_version
 
@@ -99,19 +100,18 @@ class SaveStoreMixin:
             checked = now()
             history = list(r.favorite_replacements)
             for choice in p.selections:
-                c, target = choice.candidate, choice.target
-                entry = FavoriteReplacement(run_id=r.id, video_id=r.video_id,
-                    scene_index=target.scene_index, scene_id=target.scene_id, layer_id=target.layer_id,
-                    item_index=choice.result_item_index,
-                    reference=AssetReference(kind='video', bucket=c.bucket, filename=c.segment, segment=c.segment,
-                        video_id=c.video_id, frame_index=c.frame_index, timestamp=c.timestamp, start_frame=0,
-                        end_frame=min(math.floor(c.duration * 30), choice.slot_frames)),
-                    source=c.source, search=p.policy.search, favorites_only=True, saved_verified=True, verified_at=checked)
-                # A late, different response version may require another read of
-                # already verified content. Retain its original placement proof.
-                if not any(item.model_dump(exclude={'verified_at'}) == entry.model_dump(exclude={'verified_at'})
-                           for item in history):
-                    history.append(entry)
+                for clip in choice_clips(choice):
+                    c, target = clip.candidate, choice.target
+                    entry = FavoriteReplacement(run_id=r.id, video_id=r.video_id,
+                        scene_index=target.scene_index, scene_id=target.scene_id, layer_id=target.layer_id,
+                        item_index=clip.result_item_index,
+                        reference=AssetReference(kind='video', bucket=c.bucket, filename=c.segment, segment=c.segment,
+                            video_id=c.video_id, frame_index=c.frame_index, timestamp=c.timestamp, start_frame=0,
+                            end_frame=min(math.floor(c.duration * 30), clip.slot_frames)),
+                        source=c.source, search=p.policy.search, favorites_only=True, saved_verified=True, verified_at=checked)
+                    if not any(item.model_dump(exclude={'verified_at'}) == entry.model_dump(exclude={'verified_at'})
+                               for item in history):
+                        history.append(entry)
             data.update(stage='ready_for_editor', favorite_replacements=tuple(x.model_dump() for x in history),
                         asset_save={**s.model_dump(), 'state': 'unchanged_verified' if unchanged else 'saved_verified',
                             'verified_version': verified_version, 'verified_fingerprint': fingerprint,

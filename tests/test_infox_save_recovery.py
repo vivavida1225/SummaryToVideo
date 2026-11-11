@@ -91,6 +91,12 @@ def test_mixed_bundle_multiple_layers_and_clip_lengths_save_and_preserve_server_
         scene['rerank_result'].extend([image('healthy.jpg', title='중립'), image('second.jpg', title='삼성'), video('old.mp4', title='SK')])
         r = store.begin_audit(r.id, expected_version=r.version)
         r = store.record_audit(r.id, audit_assets(value, template_id=1786, run_id=r.id, video_id=r.video_id), expected_version=r.version)
+        if duration == 1.0:
+            # Persisted legacy plans may loop a short clip; new plans reject stretching.
+            from backend.infox.plan_models import ReplacementPlan
+            with store._edit(r.id,r.version) as (_,data):
+                data['replacement_plan'] = ReplacementPlan().model_dump()
+            r = store.get(r.id)
         fake = SavingClient(store, r, value)
         for item in fake.items: item['duration'] = duration
         r = await prepare_plan(store, fake, r)
@@ -155,7 +161,7 @@ def test_intent_recovery_checks_candidate_url_paths_and_allows_signature_refresh
         store, r, fake = await planned(tmp_path)
         choice = r.replacement_plan.selections[0]
         proposed = apply_replacements(fake.value, r.replacement_plan.selections,
-            ephemeral={choice.candidate.key(): fake.items[0]})
+            ephemeral={choice.candidate.key(): next(item for item in fake.items if item['id']==choice.candidate.id)})
         r = store.begin_save(r.id, expected_version=r.version)
         r = store.begin_save_request(r.id, request_version=fake.value['updated_at'],
                                     result_url_fingerprint=url_reference_fingerprint(proposed), expected_version=r.version)

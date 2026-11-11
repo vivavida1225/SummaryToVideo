@@ -209,6 +209,9 @@ def _new_media(choice, layout, raw=None):
 
 
 def apply_replacements(state, choices, *, ephemeral=None):
+    if any(choice.clips for choice in choices):
+        from .sequences import apply_sequences
+        return apply_sequences(state, choices, ephemeral=ephemeral)
     ephemeral=ephemeral or {}; result=copy.deepcopy(state); groups={}; seen=set()
     for choice in choices:
         key=(choice.target.scene_index,choice.target.layer_id,choice.target.item_index)
@@ -246,6 +249,9 @@ def apply_replacements(state, choices, *, ephemeral=None):
 
 def validate_replacements(before, after, choices):
     """Check scope/normal media/timeline/selected references independently of conversion."""
+    if any(choice.clips for choice in choices):
+        from .sequences import validate_sequences
+        return validate_sequences(before, after, choices)
     scope,normal,layout,timing,refs,removed=True,True,True,True,True,True
     try:
         left,right=copy.deepcopy(before),copy.deepcopy(after)

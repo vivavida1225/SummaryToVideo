@@ -3,14 +3,16 @@ import { computed } from 'vue'
 import type { InfoXReplacementPlan } from '../types'
 
 const props = defineProps<{ plan: InfoXReplacementPlan; saveStarted?: boolean }>()
-const uniqueSegments = computed(() => new Set(props.plan.selections.map(x => `${x.candidate.id}:${x.candidate.video_id}:${x.candidate.segment}`)).size)
+const allClips = computed(() => props.plan.selections.flatMap(x => x.clips?.length ? x.clips.map(c => c.candidate) : [x.candidate]))
+const uniqueSegments = computed(() => new Set(allClips.value.map(c => `${c.bucket}:${c.segment}`)).size)
+const search = computed(() => props.plan.policy?.search ?? props.plan.search_evidence?.search ?? '반도체')
 const verified = computed(() => ['scope_preserved', 'normal_assets_preserved', 'layout_preserved',
   'timing_preserved', 'references_consistent', 'old_active_references_removed'].every(key => props.plan.checks?.[key] === true))
 const errors: Record<string, string> = {
   audit_required: '기업 에셋 검사를 완료한 뒤 계획을 만들 수 있습니다.',
   source_changed: '서버 버전 또는 배정 에셋이 달라졌습니다. 다시 검사한 뒤 기존 선택을 확인하세요.',
   draft_changed: '서버 영상의 장면·음성·자막 준비 조건을 확인하지 못해 계획을 보류했습니다.',
-  candidates_empty: '반도체 즐겨찾기 검색 결과가 없습니다.',
+  candidates_empty: '지정한 검색어의 즐겨찾기 검색 결과가 없습니다.',
   no_usable_candidate: '기술적으로 사용할 수 있는 즐겨찾기 구간을 찾지 못했습니다.',
   pagination_invalid: '검색 페이지가 일관되지 않아 전체 결과를 확인하지 못했습니다.',
   pagination_limit: '설정한 최대 페이지 수를 넘어 후보 선택을 보류했습니다.',
@@ -34,11 +36,26 @@ const errors: Record<string, string> = {
     <p v-if="plan.state === 'disabled'">이 전송본은 자동 대체가 꺼져 있어 후보 선택을 생략했습니다.</p>
     <p v-if="plan.error_code">{{ errors[plan.error_code] ?? '교체 계획을 확인하세요.' }}</p>
     <template v-if="plan.selections.length">
-      <p>고정 구간 {{ uniqueSegments }}개 · 대체 대상 {{ plan.selections.length }}개</p>
-      <p>반도체 즐겨찾기에서 선택한 구간을 유지합니다. 저장·적용 결과와 실제 재생 확인을 구분합니다.</p>
+      <p>대체 대상 {{ plan.selections.length }}개 · 배치 클립 {{ allClips.length }}개 · 서로 다른 에셋 {{ uniqueSegments }}개</p>
+      <p>{{ search }} 즐겨찾기에서 선택한 구간과 순서를 유지합니다. 저장·적용 결과와 실제 재생 확인을 구분합니다.</p>
       <ul class="infox-asset-items">
         <li v-for="(choice, index) in plan.selections" :key="index">
-          <strong>장면 {{ choice.target.scene_index + 1 }}<template v-if="choice.target.item_index != null"> · 사진 {{ choice.target.item_index + 1 }}</template> → {{ choice.candidate.title || '선택한 즐겨찾기 구간' }}</strong>
+          <strong>장면 {{ choice.target.scene_index + 1 }}<template v-if="choice.target.item_index != null"> · 사진 {{ choice.target.item_index + 1 }}</template> → {{ choice.clips?.length ? `${choice.clips.length}개 클립 연결` : (choice.candidate.title || '선택한 즐겨찾기 구간') }}</strong>
+          <template v-if="choice.clips?.length">
+            <p>대체 구간 {{ Number((choice.slot_frames / 30).toFixed(3)) }}초 · 소재 원음 끔</p>
+            <p v-if="choice.available_candidates != null && choice.available_candidates < choice.clips.length">후보 부족 · 사용 가능 {{ choice.available_candidates }}개를 순환 배치합니다.</p>
+            <ol>
+              <li v-for="(clip, clipIndex) in choice.clips" :key="clipIndex">
+                <p>{{ clipIndex + 1 }}번 · {{ clip.candidate.title || '선택한 즐겨찾기 구간' }} · {{ Number((clip.slot_frames / 30).toFixed(3)) }}초</p>
+                <details><summary>고정한 구간 확인</summary>
+                  <p>구간 ID {{ clip.candidate.id }} · 원영상 {{ clip.candidate.video_id }}</p>
+                  <p>{{ clip.candidate.bucket }} / {{ clip.candidate.segment }}</p>
+                  <p>원영상 위치 {{ clip.candidate.timestamp }}초 · 구간 번호 {{ clip.candidate.frame_index }}</p>
+                </details>
+              </li>
+            </ol>
+          </template>
+          <template v-else>
           <p>구간 {{ choice.candidate.duration }}초 · 원래 슬롯 {{ Number((choice.slot_frames / 30).toFixed(3)) }}초 · 소재 원음 끔</p>
           <p v-if="choice.slot_frames > Math.floor(choice.candidate.duration * 30)">슬롯 길이에 맞춘 반복 계획입니다. 실제 재생은 저장 단계에서 확인합니다.</p>
           <details><summary>고정한 구간 확인</summary>
@@ -46,6 +63,7 @@ const errors: Record<string, string> = {
             <p>{{ choice.candidate.bucket }} / {{ choice.candidate.segment }}</p>
             <p>원영상 위치 {{ choice.candidate.timestamp }}초 · 구간 번호 {{ choice.candidate.frame_index }}</p>
           </details>
+          </template>
         </li>
       </ul>
     </template>

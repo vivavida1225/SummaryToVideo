@@ -164,7 +164,7 @@ export interface DownloadRecord {
   publication_id: string
   kind: 'video' | 'all'
   automatic: boolean
-  state: 'pending' | 'running' | 'completed' | 'partial' | 'failed' | 'needs_attention'
+  state: 'queued' | 'pending' | 'running' | 'completed' | 'partial' | 'failed' | 'needs_attention'
   items: DownloadItem[]
   error_code: string | null
 }
@@ -178,13 +178,21 @@ export interface PublishCharge {
 export interface InfoXReplacementPlan {
   state: string
   error_code?: string | null
-  search_evidence?: { total: number; pages: number } | null
+  policy?: { search: string; reuse_policy: string }
+  search_evidence?: { total: number; pages: number; search?: string } | null
   checks?: Record<string, boolean>
   selections: Array<{
     target: { scene_index: number; layer_id: string; item_index: number | null }
     slot_frames: number
     candidate: { id: string; title: string; video_id: string; bucket: string; segment: string;
       frame_index: number; timestamp: number; duration: number }
+    available_candidates?: number | null
+    clips?: Array<{
+      candidate: { id: string; title: string; video_id: string; bucket: string; segment: string;
+        frame_index: number; timestamp: number; duration: number }
+      slot_frames: number
+      result_item_index: number | null
+    }>
   }>
 }
 

@@ -62,7 +62,7 @@ async def collect_favorites(client, *, policy=None, source='video'):
         skip += len(items)
         if skip == total:
             return FavoriteResults(tuple(candidates), raw_items, SearchEvidence(
-                fetched_at=datetime.now(timezone.utc).isoformat(), total=total, pages=page+1,
+                search=policy.search, fetched_at=datetime.now(timezone.utc).isoformat(), total=total, pages=page+1,
                 usable_schema_count=len(candidates), rejected_schema_count=rejected))
         if not items:
             raise PlanError('pagination_invalid')
@@ -84,3 +84,29 @@ async def choose_favorite(client, results, *, frozen=None, policy=None):
         if await client.favorite_segment_available(results.raw[candidate.key()]):
             return candidate
     raise PlanError('no_usable_candidate')
+
+
+async def usable_favorites(client, results, *, policy):
+    """Probe a randomized, bounded pool once; never persist signed URLs."""
+    import random
+    if not results.evidence.total:
+        raise PlanError('candidates_empty')
+    candidates = list(results.candidates)
+    random.SystemRandom().shuffle(candidates)
+    usable, seen = [], set()
+    probes = 0
+    for candidate in candidates:
+        identity = (candidate.bucket, candidate.segment)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        if probes >= policy.max_probes:
+            if usable:
+                break
+            raise PlanError('availability_limit')
+        probes += 1
+        if await client.favorite_segment_available(results.raw[candidate.key()]):
+            usable.append(candidate)
+    if not usable:
+        raise PlanError('no_usable_candidate')
+    return tuple(usable)

@@ -191,7 +191,7 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
             'run_not_found': 'InfoX 실행 기록을 찾을 수 없습니다.',
             'publication_not_found': '게시 실행 기록을 찾을 수 없습니다.',
             'download_not_found': '다운로드 기록을 찾을 수 없습니다.',
-            'download_not_ready': '영상은 렌더 완료 검증 후, 3종 파일은 업로드 완료 검증 후 다운로드할 수 있습니다.',
+            'download_not_ready': '자동 3종 저장은 렌더 완료 검증 후 실행됩니다. 수동 3종 다운로드는 업로드 완료 검증 후 사용할 수 있습니다.',
             'download_active': '다운로드가 진행 중입니다. 완료 후 파일별 결과를 확인하세요.',
             'publication_exists': '이 영상의 게시 기록이 이미 있습니다. 기존 기록을 확인하세요.',
             'editor_not_ready': '영상 저장·검증을 완료한 뒤 실행하세요.',

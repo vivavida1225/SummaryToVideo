@@ -48,7 +48,7 @@ function endComposition(event: CompositionEvent) {
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-2M6 7h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z" /></svg>
         {{ copyLabel }}
       </button>
-      <button class="ghost-button" type="button" :disabled="busy" @click="$emit('download')">
+      <button class="ghost-button" type="button" :disabled="busy" title="마지막 렌더링 단계에서 자동으로 다운로드됩니다." @click="$emit('download')">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 5-5m-5 5-5-5M5 21h14" /></svg>
         {{ downloadLabel }}
       </button>

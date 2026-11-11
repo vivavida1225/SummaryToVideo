@@ -194,6 +194,100 @@ def test_automatic_download_hook_is_after_render_and_never_stops_upload(tmp_path
     asyncio.run(scenario())
 
 
+def test_automatic_all_before_upload_partial_retry_keeps_files_and_origin(tmp_path):
+    store,pub=publication(tmp_path,uploaded=False);folder=tmp_path/'downloads';folder.mkdir()
+    fake=DownloadClient(fail=True);manager=make_manager(tmp_path,store,fake,folder)
+    async def scenario():
+        first=await manager.automatic(pub.id)
+        assert first.kind=='all' and len(first.items)==3
+        result=await wait_download(manager,first)
+        assert result.state=='partial'
+        assert len(list(folder.iterdir()))==2
+        script=next(x for x in result.items if x.kind=='script')
+        assert (await manager.automatic(pub.id)).id==first.id
+        with pytest.raises(RunError,match='download_not_ready'):
+            await manager.start(pub.id,str(uuid4()),'all')
+        with pytest.raises(RunError,match='download_not_ready'):
+            manager.store.create(pub.id,str(uuid4()),'all')
+        # Still before upload: first and second retries inherit server-side origin.
+        retry=await wait_download(manager,await manager.retry(first.id,str(uuid4())))
+        assert retry.state=='partial'
+        fake.fail=False
+        final=await wait_download(manager,await manager.retry(retry.id,str(uuid4())))
+        assert final.state=='completed' and len(list(folder.iterdir()))==3
+        assert next(x for x in final.items if x.kind=='script').path==script.path
+        assert store.get(pub.id)==pub
+        await manager.close()
+    asyncio.run(scenario())
+
+
+def test_existing_automatic_video_is_not_backfilled(tmp_path):
+    store,pub=publication(tmp_path,uploaded=False);folder=tmp_path/'downloads';folder.mkdir()
+    fake=DownloadClient();manager=make_manager(tmp_path,store,fake,folder)
+    async def scenario():
+        old=await wait_download(manager,await manager.start(pub.id,str(uuid4()),'video',automatic=True))
+        assert (await manager.automatic(pub.id)).id==old.id
+        assert len(list(folder.iterdir()))==1
+        await manager.close()
+    asyncio.run(scenario())
+
+
+def test_automatic_all_queues_behind_another_owners_video_without_aliasing(tmp_path):
+    store,pub=publication(tmp_path,uploaded=False);folder=tmp_path/'downloads';folder.mkdir()
+    fake=DownloadClient()
+    manual_manager=make_manager(tmp_path,store,fake,folder)
+    auto_manager=make_manager(tmp_path,store,fake,folder)
+    async def scenario():
+        fake.gate=asyncio.Event()
+        manual=await manual_manager.start(pub.id,str(uuid4()),'video')
+        await asyncio.sleep(.01)
+        automatic=await auto_manager.automatic(pub.id)
+        assert automatic.kind=='all' and automatic.automatic
+        assert automatic.id!=manual.id and automatic.state=='queued'
+        assert (await auto_manager.automatic(pub.id)).id==automatic.id
+        fake.gate.set()
+        await wait_download(manual_manager,manual)
+        result=await wait_download(auto_manager,automatic)
+        assert result.state=='completed' and len(result.items)==3
+        assert len(list(folder.iterdir()))==4  # Explicit manual video plus automatic set.
+        await auto_manager.close(); await manual_manager.close()
+    asyncio.run(scenario())
+
+
+def test_download_retry_cannot_borrow_another_publications_automatic_origin(tmp_path):
+    store,pub=publication(tmp_path,uploaded=False);folder=tmp_path/'downloads';folder.mkdir()
+    fake=DownloadClient();manager=make_manager(tmp_path,store,fake,folder)
+    async def scenario():
+        original=await wait_download(manager,await manager.automatic(pub.id))
+        # A forged publication identity on the internal retry path must fail too.
+        from backend.infox.downloads.store import ensure_ready
+        other=pub.model_copy(update={'id':'different-publication'})
+        with pytest.raises(RunError): ensure_ready(other,'all',retry=original)
+        await manager.close()
+    asyncio.run(scenario())
+
+
+def test_queued_automatic_restart_requires_explicit_retry_before_upload(tmp_path):
+    store,pub=publication(tmp_path,uploaded=False);folder=tmp_path/'downloads';folder.mkdir()
+    fake=DownloadClient();manager=make_manager(tmp_path,store,fake,folder)
+    async def scenario():
+        fake.gate=asyncio.Event()
+        await manager.start(pub.id,str(uuid4()),'video')
+        queued=await manager.automatic(pub.id)
+        assert queued.state=='queued'
+        await asyncio.sleep(.01)
+        await manager.close()
+        restored=make_manager(tmp_path,store,fake,folder)
+        await restored.recover()
+        assert not restored.tasks
+        assert restored.store.get(queued.id).state=='needs_attention'
+        fake.gate.set()
+        retry=await wait_download(restored,await restored.retry(queued.id,str(uuid4())))
+        assert retry.state=='completed' and len(list(folder.iterdir()))==3
+        await restored.close()
+    asyncio.run(scenario())
+
+
 def test_download_api_guards_restoration_partial_retry(tmp_path):
     import time
     from tests.test_api import auth, client

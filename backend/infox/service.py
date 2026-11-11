@@ -8,6 +8,7 @@ from ..config import MAX_INPUT_BYTES
 from ..jobs import JobManager
 from .run_models import PrepareRunInput, RunError, RunRecord, Scene, Snapshot, now, text_hash
 from .store import RunStore
+from .plan_models import ReplacementPlan, SelectionPolicy
 
 
 def creation_body(snapshot: Snapshot) -> dict:
@@ -63,7 +64,9 @@ class RunService:
             validation_issues=tuple(job.get('validation_issues', [])), warnings=tuple(job.get('warnings', [])))
         key = _digest({'job_id': job_id, 'revision': request.revision, 'text_sha256': snapshot.text_sha256,
                        'settings': request.settings.model_dump(mode='json')})
-        record = RunRecord(id=uuid4().hex, created_at=timestamp, updated_at=timestamp, snapshot=snapshot)
+        record = RunRecord(id=uuid4().hex, created_at=timestamp, updated_at=timestamp, snapshot=snapshot,
+            replacement_plan=ReplacementPlan(policy=SelectionPolicy(search=request.settings.replacement_search,
+                reuse_policy='random_six_second_sequence')))
         # Synchronous validation + transaction: local async edit requests cannot interleave here.
         return self.store.create(record, snapshot_key=key, intent_id=request.intent_id,
                                  digest=digest, new_run=request.new_run)

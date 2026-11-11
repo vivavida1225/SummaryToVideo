@@ -202,7 +202,9 @@ def test_save_reads_after_post_and_only_verified_server_content_creates_history(
         if mode in ('success', 'lost', 'refreshed_url'):
             assert final.stage == 'ready_for_editor' and final.asset_save.state == 'saved_verified'
             assert len(final.favorite_replacements) == len(r.replacement_plan.selections)
-            assert all(x.saved_verified and x.reference.filename == 'clip-0.mp4' for x in final.favorite_replacements)
+            expected = {(c.target.scene_index,c.candidate.segment) for c in r.replacement_plan.selections}
+            assert all(x.saved_verified for x in final.favorite_replacements)
+            assert {(x.scene_index,x.reference.filename) for x in final.favorite_replacements} == expected
             from backend.infox.assets import audit_assets
             audit = audit_assets(fake.value, template_id=1786, run_id=r.id, video_id=r.video_id,
                                  verified_replacements=final.favorite_replacements)
@@ -231,7 +233,9 @@ def test_stale_source_or_candidate_never_sends_save(tmp_path, change):
         if change == 'version': fake.value['updated_at'] = '2026-11-02T03:00:00Z'
         if change == 'context': fake.value['context']['concurrent'] = 'preserve'
         if change == 'target': fake.value['video']['scenes'][0]['rootShape']['layers']['media']['props']['media']['image_files'][0]['filename'] = 'changed.jpg'
-        if change == 'candidate': fake.items.pop(0)
+        if change == 'candidate':
+            chosen_id = r.replacement_plan.selections[0].candidate.id
+            fake.items = [item for item in fake.items if item['id'] != chosen_id]
         if change == 'missing_context': fake.value.pop('context')
         manager = RunManager(store, lambda: fake)
         await manager.save(r.id); await manager.wait(r.id)

@@ -12,6 +12,7 @@ from .favorites import collect_favorites, choose_favorite
 from .plan_models import PlanError
 from .replacement import apply_replacements, make_choices, state_fingerprint, validate_replacements, _ephemeral
 from .run_models import RunError
+from .sequences import choice_clips
 from .save_models import remote_version
 from .tracking import verify_draft
 
@@ -47,8 +48,9 @@ def _verify_candidate_urls(state, choices):
     for choice in choices:
         scene = state['video']['scenes'][choice.target.scene_index]
         media = scene['rootShape']['layers'][choice.target.layer_id]['props']['media']
-        actual = media['image_files'][choice.result_item_index] if choice.result_item_index is not None else media
-        _ephemeral(choice.candidate, {**actual, 'is_favorite': True})
+        for clip in choice_clips(choice):
+            actual = media['image_files'][clip.result_item_index] if clip.result_item_index is not None else media
+            _ephemeral(clip.candidate, {**actual, 'is_favorite': True})
 
 
 def save_body(state):
@@ -145,9 +147,12 @@ async def save_plan(store, client, r):
                                      expected_version=r.version)
         save_body(state)  # Check mapping before a request intent can be created.
         favorites = await collect_favorites(client, policy=p.policy)
-        for candidate in {choice.candidate.key(): choice.candidate for choice in p.selections}.values():
+        for candidate in {clip.candidate.key(): clip.candidate for choice in p.selections
+                          for clip in choice_clips(choice)}.values():
             await choose_favorite(client, favorites, frozen=candidate, policy=p.policy)
-        if make_choices(state, fresh, p.selections[0].candidate) != p.selections:
+        if tuple(c.target for c in p.selections) != tuple(item for item in fresh.items if item.verdict == 'detected'):
+            raise PlanError('source_changed')
+        if not any(c.clips for c in p.selections) and make_choices(state, fresh, p.selections[0].candidate) != p.selections:
             raise PlanError('source_changed')
         proposed = apply_replacements(state, p.selections, ephemeral=favorites.raw)
         if state_fingerprint(proposed) != p.result_fingerprint or not validate_replacements(state, proposed, p.selections).ready:

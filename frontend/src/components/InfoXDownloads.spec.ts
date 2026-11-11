@@ -41,6 +41,23 @@ it('prevents_all_download_before_verified_upload_and_during_an_active_download',
   expect(api.startInfoxDownload).not.toHaveBeenCalled()
 })
 
+it('shows automatic three-file results and retry before upload without offering manual all',async()=>{
+  vi.mocked(api.infoxDownloads).mockResolvedValue({downloads:[{...partial,automatic:true}]})
+  render(InfoXDownloads,{props:{publicationId:'pub-1',uploadedVerified:false}})
+  expect(await screen.findByText('렌더 완료 대본·원본·영상 자동 다운로드')).toBeVisible()
+  expect(screen.queryByRole('button',{name:'대본·원본·영상 3개 파일 다운로드'})).not.toBeInTheDocument()
+  expect(screen.getByRole('button',{name:'실패 파일 다시 다운로드'})).toBeEnabled()
+})
+
+it('waits_for_a_queued_automatic_operation_without_offering_retry_or_new_work',async()=>{
+  vi.mocked(api.infoxDownloads).mockResolvedValue({downloads:[{...partial,state:'queued',automatic:true}]})
+  render(InfoXDownloads,{props:{publicationId:'pub-1',uploadedVerified:true}})
+  expect(await screen.findByText('진행 중인 파일 다운로드 완료 대기')).toBeVisible()
+  expect(screen.getByRole('button',{name:'대본·원본·영상 3개 파일 다운로드'})).toBeDisabled()
+  expect(screen.queryByRole('button',{name:'실패 파일 다시 다운로드'})).not.toBeInTheDocument()
+  expect(api.startInfoxDownload).not.toHaveBeenCalled()
+})
+
 it('ignores_a_stale_poll_after_a_new_download_response',async()=>{
   let release!: (result: {downloads: DownloadRecord[]})=>void
   vi.mocked(api.infoxDownloads).mockResolvedValueOnce({downloads:[]})

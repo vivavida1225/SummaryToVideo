@@ -4,7 +4,8 @@ from datetime import datetime, timezone
 
 from .assets import audit_assets
 from .errors import InfoXError
-from .favorites import collect_favorites, choose_favorite
+from .favorites import collect_favorites, choose_favorite, usable_favorites
+from .sequences import make_sequence_choices, choice_clips
 from .plan_models import PlanError, PreservationChecks, ReplacementPlan
 from .replacement import apply_replacements, make_choices, state_fingerprint, validate_replacements
 from .tracking import verify_draft
@@ -41,9 +42,18 @@ async def prepare_plan(store,client,r):
                                    source_fingerprint=fingerprint,checked_at=_now())
         else:
             favorites=await collect_favorites(client,policy=previous.policy)
-            frozen=previous.selections[0].candidate if previous.selections else None
-            selected=await choose_favorite(client,favorites,frozen=frozen,policy=previous.policy)
-            choices=make_choices(state,fresh,selected)
+            if previous.selections:
+                candidates = {clip.candidate.key():clip.candidate for choice in previous.selections
+                              for clip in choice_clips(choice)}
+                for candidate in candidates.values():
+                    await choose_favorite(client,favorites,frozen=candidate,policy=previous.policy)
+                choices = previous.selections
+            elif previous.policy.reuse_policy == 'random_six_second_sequence':
+                pool = await usable_favorites(client,favorites,policy=previous.policy)
+                choices = make_sequence_choices(state,fresh,pool)
+            else:
+                selected=await choose_favorite(client,favorites,policy=previous.policy)
+                choices=make_choices(state,fresh,selected)
             r=store.freeze_choices(r.id,choices,source_fingerprint=fingerprint,source_version=fresh.source_version,
                                    evidence=favorites.evidence,expected_version=r.version)
             proposed=apply_replacements(state,choices,ephemeral=favorites.raw)

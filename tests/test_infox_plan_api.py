@@ -42,7 +42,9 @@ def test_plan_api_security_fixed_selection_disk_restore_and_no_saved_provenance(
         assert result['stage']=='replacement_planned'
         plan=result['replacement_plan']
         assert plan['state']=='ready' and len(plan['selections'])==2
-        assert {x['candidate']['id'] for x in plan['selections']}=={'item-0'}
+        assert {x['candidate']['id'] for x in plan['selections']} <= {'item-0','item-1'}
+        assert plan['policy']['search'] == '중국 대만 반도체'
+        assert all(len(x['clips']) == 1 for x in plan['selections'])
         assert result['favorite_replacements']==[]
         assert 'PRIVATE' not in str(result) and 'segment_url_presigned' not in str(plan)
         assert result['snapshot']==r.snapshot.model_dump(mode='json')
@@ -56,7 +58,7 @@ def test_selection_is_committed_before_conversion_and_retry_never_reselects(tmp_
         manager=RunManager(store,lambda:fake)
         def fail(*args,**kwargs):
             assert store.get(r.id).replacement_plan.state=='selected'
-            assert store.get(r.id).replacement_plan.selections[0].candidate.id=='item-0'
+            assert store.get(r.id).replacement_plan.selections[0].candidate.id in ('item-0','item-1')
             raise PlanError('transform_invalid')
         with patch('backend.infox.planner.apply_replacements',side_effect=fail):
             await manager.plan(r.id); await manager.wait(r.id)
@@ -67,7 +69,7 @@ def test_selection_is_committed_before_conversion_and_retry_never_reselects(tmp_
         await restored.plan(r.id); await restored.wait(r.id)
         final=store.get(r.id)
         assert final.replacement_plan.state=='ready'
-        assert final.replacement_plan.selections[0].candidate.id=='item-0'
+        assert final.replacement_plan.selections==failed.replacement_plan.selections
         await restored.close(); await manager.close()
     asyncio.run(scenario())
 

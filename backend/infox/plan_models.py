@@ -16,11 +16,11 @@ class PlanError(Exception):
 
 
 class SelectionPolicy(AuditModel):
-    search: Literal['반도체'] = '반도체'
+    search: Literal['반도체', '중국 대만 반도체'] = '반도체'
     favorites_only: Literal[True] = True
     source: Literal['video'] = 'video'
     date_from: None = None
-    reuse_policy: Literal['first_usable_reuse'] = 'first_usable_reuse'
+    reuse_policy: Literal['first_usable_reuse', 'random_six_second_sequence'] = 'first_usable_reuse'
     page_size: Literal[50] = 50
     max_pages: int = Field(default=20, ge=1, le=20)
     max_probes: int = Field(default=20, ge=1, le=100)
@@ -54,7 +54,7 @@ class FavoriteCandidate(AuditModel):
 
 class SearchEvidence(AuditModel):
     source: Literal['video'] = 'video'
-    search: Literal['반도체'] = '반도체'
+    search: Literal['반도체', '중국 대만 반도체'] = '반도체'
     favorites_only: Literal[True] = True
     date_from: None = None
     fetched_at: str
@@ -64,11 +64,20 @@ class SearchEvidence(AuditModel):
     rejected_schema_count: int = Field(ge=0)
 
 
+class ReplacementClip(AuditModel):
+    candidate: FavoriteCandidate
+    slot_frames: int = Field(gt=0)
+    result_item_index: int | None = Field(default=None, ge=0)
+
+
 class ReplacementChoice(AuditModel):
     target: AssetItem
     candidate: FavoriteCandidate
     slot_frames: int = Field(gt=0)
     result_item_index: int | None = Field(default=None, ge=0)
+    # Empty for persisted legacy plans. candidate remains the first clip for compatibility.
+    clips: tuple[ReplacementClip, ...] = ()
+    available_candidates: int | None = Field(default=None, ge=1)
 
 
 class PreservationChecks(AuditModel):

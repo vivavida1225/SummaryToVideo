@@ -8,6 +8,7 @@ from ..publishing.tracking import file_fingerprint, history_logs
 from ..run_models import RunError
 from .files import downloads_folder, intact, write_text, file_io
 from .models import ACTIVE
+from .store import ensure_ready
 
 
 def error_code(error):
@@ -32,16 +33,18 @@ class DownloadManager:
 
     async def start(self, publication_id, intent_id, kind, *, automatic=False, retry_of=None):
         pub = self.store.publications.get(publication_id)
-        if not pub.render_task_id or not pub.render_file_fingerprint or (kind == 'all' and not pub.uploaded_verified):
-            raise RunError('download_not_ready')
+        ensure_ready(pub,kind,automatic=automatic,retry=self.store.get(retry_of) if retry_of else None)
         record, created = self.store.create(publication_id, intent_id, kind, automatic=automatic, retry_of=retry_of)
         if created:
             self.tasks[record.id] = asyncio.create_task(self._execute(record.id, retry_of))
         return record
 
     async def automatic(self, publication_id):
-        return await self.start(publication_id, str(uuid5(NAMESPACE_URL, 'infox-auto-download:'+publication_id)),
-                                'video', automatic=True)
+        existing = next((r for r in self.store.history(publication_id) if r.automatic),None)
+        if existing is not None:
+            return existing  # Never backfill historical video-only operations.
+        return await self.start(publication_id, str(uuid5(NAMESPACE_URL, 'infox-auto-download-all:'+publication_id)),
+                                'all', automatic=True)
 
     async def retry(self, id, intent_id):
         record = self.store.get(id)
@@ -53,6 +56,14 @@ class DownloadManager:
         record = self.store.get(id)
         items = list(record.items)
         try:
+            if record.state == 'queued':
+                while True:
+                    claimed = self.store.activate_queued(id)
+                    if claimed is None:
+                        return
+                    if claimed:
+                        break
+                    await asyncio.sleep(.2)
             self.store.update(id, state='running')
             try:
                 folder = await asyncio.to_thread(self.folder_provider)

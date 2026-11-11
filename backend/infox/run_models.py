@@ -40,7 +40,7 @@ class ProductionSettings(StrictModel):
     lang: Literal['ko'] = 'ko'
     script_version: Literal['v1'] = 'v1'
     auto_replace: bool = True
-    replacement_search: Literal['반도체'] = '반도체'
+    replacement_search: Literal['반도체', '중국 대만 반도체'] = '중국 대만 반도체'
 
     @field_validator('title')
     @classmethod
