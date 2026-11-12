@@ -19,6 +19,16 @@ const ready = run({ stage: 'ready_for_editor', video_id: 'video-1', asset_save: 
 const statuses = (input: Parameters<typeof infoxSteps>[0]) => infoxSteps(input).map(step => step.status)
 
 describe('InfoX step model', () => {
+  it('keeps production warnings while manual review and publication advance independently', () => {
+    const warning = run({ stage: 'needs_attention', video_id: 'video-1', tracking_active: false,
+      can_enter_manual_review: true, can_open_editor: false, can_prepare_publication: false })
+    const steps = infoxSteps({ run: warning, pending: false, publication: null })
+    expect(steps[1]!.status).toBe('attention')
+    expect(steps[2]!.status).toBe('action')
+    expect(currentStep(steps).key).toBe('publish')
+    expect(currentStep(infoxSteps({ run: warning, pending: false, publication: publication() })).key).toBe('publish')
+    expect(currentStep(infoxSteps({ run: warning, pending: false, publication: publication({ stage: 'completed' }) })).key).toBe('complete')
+  })
   it('maps runs and publications to the four steps and the current one', () => {
     expect(statuses({ run: null, pending: false, publication: null })).toEqual(['action', 'waiting', 'waiting', 'waiting'])
     expect(statuses({ run: null, pending: true, publication: null })).toEqual(['attention', 'waiting', 'waiting', 'waiting'])

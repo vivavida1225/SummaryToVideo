@@ -326,6 +326,8 @@ main { width: min(1180px, calc(100% - 48px)); margin: 0 auto; }
 .infox-editor { display: grid; gap: 8px; }
 .infox-editor h5 { font-size: .84rem; }
 .infox-publishing { display: grid; gap: 10px; min-width: 0; padding-top: 12px; border-top: 1px solid var(--line); }
+.infox-review-confirmation { display: flex; align-items: flex-start; gap: 9px; padding: 12px; background: var(--teal-pale); border-radius: 6px; line-height: 1.6; }
+.infox-review-confirmation input { flex: 0 0 auto; margin-top: 5px; accent-color: var(--teal); }
 .infox-facts { display: grid; gap: 8px; margin: 0; }
 .infox-facts > div { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 10px; align-items: center; font-size: .8rem; }
 .infox-facts dt { color: var(--muted); font-weight: 700; }

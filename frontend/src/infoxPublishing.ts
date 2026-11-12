@@ -44,6 +44,8 @@ export function formatPublishMetadata(day: string) {
 
 type Port = Pick<typeof api, 'startInfoxPublication'|'rerenderInfoxPublication'|'infoxPublicationHistory'|'latestInfoxPublication'|'infoxPublication'|'copyInfoxPublicationLink'|'infoxPublicationPreview'>
 export class PublishingControl {
+  readonly reviewConfirmed = ref(false)
+  private reviewedVersion: string | null = null
   readonly record = ref<PublicationRecord|null>(null)
   readonly history = ref<PublicationRecord[]>([])
   readonly preparing = ref(false)
@@ -56,6 +58,7 @@ export class PublishingControl {
   readonly canPrepare = computed(()=>!!this.record.value && terminal.has(this.record.value.stage) &&
     !this.preparing.value && !this.loading.value && !this.busy.value && !this.uncertain.value)
   readonly canStart = computed(()=>(!this.record.value || this.preparing.value) &&
+    this.reviewConfirmed.value && !!this.reviewedVersion &&
     !this.loading.value && !this.busy.value && !this.uncertain.value &&
     !!formatPublishMetadata(this.marketDate.value) && this.charge.value?.available===true && this.charge.value.can_start===true)
   private runId: string|null = null
@@ -65,8 +68,30 @@ export class PublishingControl {
   private timer: ReturnType<typeof setTimeout>|undefined
   constructor(private port: Port, private initialMarketDate = seoulToday()) { this.marketDate.value=initialMarketDate }
 
-  dispose() { this.epoch++; this.draftEpoch++; clearTimeout(this.timer); this.runId=null }
+  dispose() { this.epoch++; this.draftEpoch++; clearTimeout(this.timer); this.runId=null; this.resetReview() }
+
+  private resetReview() { this.reviewConfirmed.value=false; this.reviewedVersion=null }
+
+  async confirmReview(confirmed: boolean) {
+    this.resetReview()
+    if(!confirmed || !this.runId || !this.previewAllowed || this.loading.value || this.busy.value) return
+    const epoch=this.epoch, draft=this.draftEpoch
+    this.loading.value=true; this.error.value=''
+    try {
+      const preview=await this.port.infoxPublicationPreview(this.runId)
+      if(epoch!==this.epoch || draft!==this.draftEpoch || !this.previewAllowed) return
+      this.charge.value=preview
+      if(preview.latest_publication_id!==(this.record.value?.id ?? null)) {
+        this.error.value='게시 기록이 변경되었습니다. 최신 회차를 다시 불러오세요.'; return
+      }
+      if(preview.can_start && preview.remote_updated_at) {
+        this.reviewedVersion=preview.remote_updated_at; this.reviewConfirmed.value=true
+      } else this.error.value=publishErrors[preview.blocked_reason ?? ''] ?? '최신 저장본을 확인하지 못했습니다. 다시 확인하세요.'
+    } catch { if(epoch===this.epoch) this.error.value='최신 저장본 조회에 실패했습니다. 검토 완료를 다시 확인하세요.' }
+    finally { if(epoch===this.epoch) this.loading.value=false }
+  }
   async restore(id: string, preview = true) {
+    this.resetReview()
     const epoch=++this.epoch
     this.draftEpoch++
     clearTimeout(this.timer)
@@ -87,6 +112,7 @@ export class PublishingControl {
   }
   async prepareNew() {
     if(!this.canPrepare.value || !this.runId) return
+    this.resetReview()
     const epoch=this.epoch, draft=++this.draftEpoch, id=this.runId
     this.loading.value=true; this.error.value=''; this.charge.value=null
     try {
@@ -108,12 +134,13 @@ export class PublishingControl {
     finally {if(epoch===this.epoch && draft===this.draftEpoch) this.loading.value=false}
   }
   cancelPreparation() {
+    this.resetReview()
     this.draftEpoch++; this.preparing.value=false; this.loading.value=false; this.charge.value=null; this.error.value=''
     if(this.record.value) this.marketDate.value=this.record.value.snapshot.market_date
   }
   async setEligibility(eligible: boolean) {
     this.previewAllowed=eligible
-    if(!eligible) {this.charge.value=null; return}
+    if(!eligible) {this.charge.value=null; this.resetReview(); return}
     if(!this.runId || this.loading.value || this.record.value || this.uncertain.value) return
     const epoch=this.epoch
     this.loading.value=true
@@ -151,9 +178,11 @@ export class PublishingControl {
     this.busy.value=true; this.uncertain.value=true; this.error.value=''
     const epoch=this.epoch, id=this.runId, previous=this.record.value?.id
     const day=this.marketDate.value
+    const reviewed_remote_updated_at=this.reviewedVersion!
+    this.resetReview()
     this.preparing.value=false; this.charge.value=null; this.draftEpoch++
     try {
-      const input={intent_id:crypto.randomUUID(),market_date:day}
+      const input={intent_id:crypto.randomUUID(),market_date:day,review_confirmed:true,reviewed_remote_updated_at}
       const r=previous ? await this.port.rerenderInfoxPublication(id,{...input,previous_publication_id:previous}) :
         await this.port.startInfoxPublication(id,input)
       if(epoch===this.epoch) {this.uncertain.value=false; this.apply(r)}

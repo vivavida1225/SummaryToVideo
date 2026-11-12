@@ -20,7 +20,8 @@ def verified(root):
 
 def test_editor_claim_is_durable_single_automatic_across_owners_and_cas(tmp_path):
     from backend.infox.editor import EditorClaim, EditorUpdate
-    store, r = verified(tmp_path)
+    from tests.infox_publishing_fakes import reviewed
+    store, r = reviewed(tmp_path)
     def claim(index):
         return store.claim_editor(r.id, EditorClaim(attempt_id=f'{index:032x}', mode='automatic', tab_state='created'))
     with ThreadPoolExecutor(max_workers=4) as pool:
@@ -51,7 +52,8 @@ def test_editor_navigation_requires_all_three_verification_gates(tmp_path, alter
 
 
 def test_editor_api_guards_restore_and_explicit_reopen(tmp_path):
-    store, r = verified(tmp_path)
+    from tests.infox_publishing_fakes import reviewed
+    store, r = reviewed(tmp_path)
     with client(tmp_path) as c:
         path = f'/api/infox-runs/{r.id}/editor-attempts'
         headers = auth(c)

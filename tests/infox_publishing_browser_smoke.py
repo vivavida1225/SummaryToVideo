@@ -15,7 +15,7 @@ from playwright.sync_api import expect, sync_playwright
 
 from backend.app import create_app
 from backend.config import Settings
-from tests.test_infox_editor import verified
+from tests.infox_publishing_fakes import reviewed as verified
 from tests.infox_publishing_fakes import PublishClient, PublishClipboard
 
 
@@ -25,7 +25,11 @@ def scenario(playwright, root, mode):
         project=Path(temporary)
         shutil.copytree(root/'frontend/dist',project/'frontend/dist')
         with ThreadPoolExecutor(max_workers=1) as pool:
-            runs,run=pool.submit(verified,project).result()
+            if mode == 'warning':
+                from tests.test_infox_manual_review import warning_run
+                runs,run=pool.submit(warning_run,project).result()
+            else:
+                runs,run=pool.submit(verified,project).result()
         fake=PublishClient(fail=mode.removeprefix('failure_') if mode.startswith('failure_') else None,
                            lost='render' if mode=='lost_ack' else None, early=True)
         if mode=='initialization':
@@ -88,6 +92,8 @@ def scenario(playwright, root, mode):
             unexpected,errors,posts=[],[],[]
             def route(reqroute):
                 req=reqroute.request
+                if mode == 'warning' and req.url.startswith('https://infox2.infomaxai.com/studio/library/videos/'):
+                    reqroute.fulfill(status=200,content_type='text/html',body='<h1>Controlled manual editor</h1>'); return
                 if not req.url.startswith(url):
                     unexpected.append(req.url); reqroute.abort(); return
                 if req.method=='POST' and req.url.endswith(('/publications','/publications/rerender')):
@@ -106,12 +112,29 @@ def scenario(playwright, root, mode):
             # Current state and the single primary action live in the side panel.
             side=page.get_by_role('complementary',name='InfoX 현재 상태와 다음 행동',exact=True)
             headline=side.locator('.infox-panel-headline')
+            if mode == 'warning':
+                expect(page.locator('.infox-step[data-status="attention"]')).to_have_count(1)
+                side.get_by_role('button',name='InfoX에서 검토·수정',exact=True).click()
+                assert runs.get(run.id).review_mode == 'manual_review'
+                assert runs.get(run.id).stage == 'needs_attention'
             button=side.get_by_role('button',name='편집 완료 · 렌더 및 유튜브 업로드',exact=True)
+            confirmation=page.get_by_role('checkbox',name='InfoX에서 검토·수정 후 저장했으며, 현재 영상으로 게시합니다')
+            expect(button).to_be_disabled()
+            expect(confirmation).to_be_enabled()
+            if mode == 'warning':
+                images=root/'.runtime/manual-review-qa'; images.mkdir(parents=True,exist_ok=True)
+                for width in (1440,390,320):
+                    page.set_viewport_size({'width':width,'height':1100})
+                    assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
+                    page.locator('.infox-preparation').screenshot(path=str(images/f'manual-review-{width}.png'))
+                page.set_viewport_size({'width':1440,'height':1100})
+            confirmation.check()
             expect(button).to_be_enabled()
             panel.get_by_label('게시 기준일').fill('2026-11-04')
             other=None
             if mode=='duplicate':
                 other=context.new_page(); other.goto(url,wait_until='networkidle')
+                other.get_by_role('checkbox',name='InfoX에서 검토·수정 후 저장했으며, 현재 영상으로 게시합니다').check()
                 expect(other.get_by_role('button',name='편집 완료 · 렌더 및 유튜브 업로드',exact=True)).to_be_enabled()
             button.click()
             if mode in ('duplicate','reload','restart'):
@@ -161,12 +184,16 @@ def scenario(playwright, root, mode):
                         return await read(video_id)
                     fake.render_logs=second_gated
                 page.get_by_role('button',name='새 회차 렌더·업로드 준비',exact=True).click()
+                expect(confirmation).not_to_be_checked()
+                expect(confirmation).to_be_enabled()
+                confirmation.check()
                 expect(button).to_be_enabled()
                 expect(panel.get_by_label('게시 기준일')).to_have_value('2026-11-04')
                 panel.get_by_label('게시 기준일').fill('2026-11-03')
                 if mode=='rerender_duplicate':
                     other=context.new_page();other.goto(url,wait_until='networkidle')
                     other.get_by_role('button',name='새 회차 렌더·업로드 준비',exact=True).click()
+                    other.get_by_role('checkbox',name='InfoX에서 검토·수정 후 저장했으며, 현재 영상으로 게시합니다').check()
                     other_button=other.get_by_role('button',name='편집 완료 · 렌더 및 유튜브 업로드',exact=True)
                     expect(other_button).to_be_enabled()
                 button.click()
@@ -177,7 +204,7 @@ def scenario(playwright, root, mode):
                 if mode=='rerender_duplicate': expect(other_button).to_have_count(0,timeout=15000)
                 expect(page.get_by_role('link',name='https://youtu.be/ZYXWVUTSRQP')).to_be_visible()
                 expect(panel.get_by_label('게시 기준일')).to_have_value('2026-11-03')
-                page.get_by_role('button',name='펼치기 편집 및 게시',exact=True).click()
+                page.get_by_role('button',name='펼치기 InfoX 수기 검토·수정·게시',exact=True).click()
                 panel.get_by_text('이전 게시 회차 (1)',exact=True).click()
                 expect(panel.get_by_role('link',name='https://youtu.be/abcdefghijk')).to_be_visible()
                 assert first_calls==fake.calls==['render','metadata_generate','metadata_update','upload']
@@ -214,11 +241,11 @@ def scenario(playwright, root, mode):
 def main():
     root=Path(__file__).resolve().parents[1]
     with sync_playwright() as playwright:
-        for mode in ('success','initialization','failure_render','failure_metadata_generate','failure_metadata_update','failure_upload',
+        for mode in ('warning','success','initialization','failure_render','failure_metadata_generate','failure_metadata_update','failure_upload',
                      'lost_ack','duplicate','reload','restart','clipboard_failure',
                      'rerender','rerender_duplicate','rerender_lost_response'):
             scenario(playwright,root,mode)
-    print('PASS: 14 publication browser scenarios; external requests 0.',flush=True)
+    print('PASS: 15 publication browser scenarios; external requests 0.',flush=True)
 
 
 if __name__=='__main__': main()

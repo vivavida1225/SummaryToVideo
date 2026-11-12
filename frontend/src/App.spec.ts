@@ -269,7 +269,7 @@ describe('App', () => {
     expect(starts).toBe(1)
     expect(reads).toBe(2)
   })
-  it('InfoX 제작은 확정 스냅샷 실행 ID로 시작하고 조회하여 시안 준비와 수동 편집 링크를 표시한다', async () => {
+  it('InfoX 제작은 확정 실행 ID로 시안 준비를 조회하고 수기 전환 전에는 직접 편집 링크를 숨긴다', async () => {
     sessionStorage.setItem('market-compressor.job-id', 'job-1')
     const run = makeInfoxRun()
     let started = false
@@ -294,7 +294,7 @@ describe('App', () => {
     await fireEvent.click(button)
     await screen.findByText('시안 준비 확인 · 에셋 검사를 시작할 수 있습니다.', {}, { timeout: 4000 })
     expect(starts).toBe(1)
-    expect(screen.getByRole('link', { name: 'InfoX 편집 화면 수동 열기' })).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(screen.queryByRole('link', { name: 'InfoX 편집 화면 수동 열기' })).not.toBeInTheDocument()
     expect(fetchMock.mock.calls.some(([input]) => requestPath(input).includes('/infox-runs/'))).toBe(true)
   })
   it('InfoX 확정은 편집 저장 후 최신 revision을 사용하며 중복 클릭을 막는다', async () => {

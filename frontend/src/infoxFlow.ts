@@ -1,4 +1,4 @@
-import { editorEligible } from './infoxEditor'
+import { manualReviewAvailable } from './infoxEditor'
 import type { InfoXRun, PublicationRecord } from './types'
 
 // Display-only model for the InfoX panel. It never decides whether a request
@@ -12,7 +12,7 @@ export const stepStatusLabels: Record<InfoxStepStatus, string> = {
 }
 
 export const stepTitles: Record<InfoxStepKey, string> = {
-  prepare: '제작 준비', produce: '자동 제작', publish: '편집 및 게시', complete: '완료',
+  prepare: '제작 준비', produce: '자동 제작·검사', publish: 'InfoX 수기 검토·수정·게시', complete: '완료',
 }
 
 export interface InfoxStep { key: InfoxStepKey; number: number; title: string; status: InfoxStepStatus }
@@ -39,7 +39,7 @@ export function runTracking(run: InfoXRun): boolean {
 function produceStatus(run: InfoXRun): InfoxStepStatus {
   if (run.stage === 'failed') return 'failed'
   if (run.requires_reconciliation || run.stage === 'needs_attention') return 'attention'
-  if (run.stage === 'ready_for_editor') return editorEligible(run) ? 'done' : 'attention'
+  if (run.stage === 'ready_for_editor') return ['saved_verified', 'unchanged_verified'].includes(run.asset_save?.state ?? '') ? 'done' : 'attention'
   if (runTracking(run)) return 'active'
   if (run.stage === 'prepared') return 'waiting'
   return 'action' // draft_ready, assets_audited, replacement_planned: a manual step is available.
@@ -60,7 +60,7 @@ export function infoxSteps(input: InfoxFlowInput): InfoxStep[] {
   else if (run) {
     status.prepare = run.stage === 'prepared' && !run.requires_reconciliation ? 'action' : 'done'
     status.produce = produceStatus(run)
-    if (status.produce === 'done') {
+    if (manualReviewAvailable(run) || run.review_mode === 'manual_review' || publication || status.produce === 'done') {
       status.publish = publishStatus(publication, !!input.preparingPublication)
       if (status.publish === 'done') status.complete = publication?.stage === 'clipboard_failed' ? 'action' : 'done'
     }
@@ -71,6 +71,9 @@ export function infoxSteps(input: InfoxFlowInput): InfoxStep[] {
 
 /** The step the user should look at now: the first one that is not done. */
 export function currentStep(steps: InfoxStep[]): InfoxStep {
+  const publish = steps.find(step => step.key === 'publish')!
+  if (publish.status === 'done') return steps.find(step => step.key === 'complete')!
+  if (publish.status !== 'waiting') return publish
   return steps.find(step => step.status !== 'done') ?? steps[steps.length - 1]!
 }
 

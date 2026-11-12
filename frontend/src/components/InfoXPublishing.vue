@@ -9,7 +9,7 @@ import type { InfoXRun } from '../types'
 // steps never disposes it or re-runs its requests. Start/copy live in the
 // parent's action area; this component shows settings, status and history.
 const props = defineProps<{ run: InfoXRun; control: PublishingControl }>()
-const { record, history, preparing, marketDate, busy, loading, uncertain, error, charge } = props.control
+const { record, history, preparing, marketDate, busy, loading, uncertain, error, charge, reviewConfirmed } = props.control
 const drafting = computed(() => !record.value || preparing.value)
 const metadata = computed(() => drafting.value ? formatPublishMetadata(marketDate.value) : record.value?.snapshot)
 const older = computed(() => history.value.filter(r => r.id !== record.value?.id))
@@ -20,7 +20,7 @@ const chargeLabel = computed(() => !charge.value?.available ? '확인 중 또는
 <template>
   <section class="infox-publishing" aria-label="렌더 및 유튜브 업로드">
     <p v-if="drafting" class="infox-guide">InfoX 편집기에서 편집 내용을 저장한 뒤 실행하세요. 실행 중에는 편집을 계속하지 마세요.</p>
-    <p v-if="!editorEligible(run)">영상 저장·검증 완료 후 게시를 시작할 수 있습니다.</p>
+    <p v-if="!editorEligible(run)">InfoX 수기 검토로 전환한 뒤 게시를 준비하세요.</p>
     <template v-if="preparing">
       <p>새 회차를 준비합니다. 최신 저장본을 렌더하고 새 YouTube 링크를 만듭니다. 기존 영상과 링크는 유지됩니다.</p>
       <button type="button" class="ghost-button" :disabled="busy" @click="control.cancelPreparation()">준비 취소</button>
@@ -41,6 +41,12 @@ const chargeLabel = computed(() => !charge.value?.available ? '확인 중 또는
         <dd>{{ chargeLabel }}<template v-if="charge?.credits != null"> · 예상 차감 크레딧 {{ charge.credits }}</template><template v-if="charge?.credits != null && charge.duration_seconds != null"> · 영상 길이 {{ charge.duration_seconds }}초</template></dd>
       </div>
     </dl>
+    <label v-if="drafting" class="infox-review-confirmation">
+      <input type="checkbox" :checked="reviewConfirmed" :disabled="!editorEligible(run) || busy || loading || uncertain"
+        @change="control.confirmReview(($event.target as HTMLInputElement).checked)" />
+      InfoX에서 검토·수정 후 저장했으며, 현재 영상으로 게시합니다
+    </label>
+    <p v-if="record?.snapshot.review_confirmed_at">수기 검토 확인: {{ new Date(record.snapshot.review_confirmed_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) }}</p>
     <p v-if="drafting && charge?.blocked_reason" class="inline-error" role="alert">{{ publishErrors[charge.blocked_reason] ?? '게시 조건을 확인하지 못했습니다. 다시 준비하세요.' }}</p>
     <div v-if="record" class="infox-publish-status" aria-live="polite">
       <p role="status">{{ publishStages[record.stage] ?? '게시 상태 확인 필요' }}</p>

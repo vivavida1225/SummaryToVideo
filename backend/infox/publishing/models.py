@@ -21,6 +21,14 @@ ErrorCode = Literal['preflight_unconfirmed', 'existing_publication', 'remote_cha
 class PublishInput(StrictModel):
     intent_id: str
     market_date: str
+    review_confirmed: bool = False
+    reviewed_remote_updated_at: str | None = None
+
+    @field_validator('reviewed_remote_updated_at')
+    @classmethod
+    def saved_version(cls, value):
+        from ..save_models import remote_version
+        return remote_version(value) if value is not None else None
 
     @field_validator('intent_id')
     @classmethod
@@ -51,6 +59,9 @@ class PublishSnapshot(StrictModel):
     privacy_status: Literal['unlisted'] = 'unlisted'
     remote_updated_at: str | None = None
     baseline_remote_task_ids: tuple[str, ...] = ()
+    review_confirmed_at: str | None = None
+    reviewed_remote_updated_at: str | None = None
+    review_warning_codes: tuple[str, ...] = ()
 
 
 class PublishReceipt(Receipt):

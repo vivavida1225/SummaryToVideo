@@ -47,6 +47,11 @@ export async function bootstrapSession(): Promise<SessionInfo> {
 }
 
 export const api = {
+  manualReviewInfox(id: string, expected_version: number): Promise<InfoXRun> {
+    return request(`/api/infox-runs/${encodeURIComponent(id)}/manual-review`, {
+      method: 'POST', body: JSON.stringify({ expected_version }),
+    })
+  },
   infoxDownloads(id: string) {
     return request<{ downloads: DownloadRecord[] }>(`/api/infox-publications/${id}/downloads`)
   },

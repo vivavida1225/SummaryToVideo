@@ -6,6 +6,13 @@ from backend.infox.errors import InfoXError
 from backend.infox.sse import SSEEvent
 
 
+def reviewed(root):
+    from tests.test_infox_editor import verified
+    from backend.infox.review import enter_manual_review
+    store, run = verified(root)
+    return store, enter_manual_review(store, run.id, run.version)
+
+
 class PublishClient:
     """External boundary double: no authentication, network, or OS clipboard."""
     def __init__(self, *, fail=None, lost=None, changed=False, early=False, no_stream=False, suffix=''):

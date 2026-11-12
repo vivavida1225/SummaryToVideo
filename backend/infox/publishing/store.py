@@ -3,7 +3,7 @@ import json
 from datetime import date
 from uuid import uuid4
 
-from ..editor import editor_ready
+from ..review import publication_ready, warning_codes
 from ..run_models import RunError, now
 from .models import TERMINAL, PublicationRecord, PublishSnapshot, PublishReceipt, RerenderInput, format_publish_metadata
 from .migration import create_publications, migrate_publications
@@ -41,6 +41,8 @@ class PublicationStore:
         parts = [run_id, input.market_date]
         if isinstance(input, RerenderInput):
             parts.append(input.previous_publication_id)
+        if input.review_confirmed or input.reviewed_remote_updated_at is not None:
+            parts.extend([input.review_confirmed, input.reviewed_remote_updated_at])
         digest = hashlib.sha256(json.dumps(parts).encode()).hexdigest()
         self.run_store._run_id(run_id)
         with self.run_store._transaction() as conn:
@@ -65,13 +67,17 @@ class PublicationStore:
                 record = previous
                 created = False
             else:
-                if not editor_ready(run):
+                if not publication_ready(run):
                     raise RunError('editor_not_ready')
+                if not input.review_confirmed or not input.reviewed_remote_updated_at:
+                    raise RunError('manual_review_required')
                 title, description = format_publish_metadata(date.fromisoformat(input.market_date))
                 record = PublicationRecord(id=uuid4().hex, run_id=run_id, video_id=run.video_id,
                     attempt_number=previous.attempt_number + 1 if previous else 1,
                     previous_publication_id=previous.id if previous else None,
-                    snapshot=PublishSnapshot(market_date=input.market_date, title=title, description=description),
+                    snapshot=PublishSnapshot(market_date=input.market_date, title=title, description=description,
+                        review_confirmed_at=now(), reviewed_remote_updated_at=input.reviewed_remote_updated_at,
+                        review_warning_codes=warning_codes(run)),
                     created_at=now(), updated_at=now())
                 conn.execute('INSERT INTO publications VALUES (?,?,?,?,?,?,?)',
                              (record.id, run_id, run.video_id, record.model_dump_json(),

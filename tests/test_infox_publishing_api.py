@@ -2,7 +2,7 @@ import time
 from uuid import uuid4
 
 from tests.test_api import auth, client
-from tests.test_infox_editor import verified
+from tests.infox_publishing_fakes import reviewed as verified
 from tests.infox_publishing_fakes import PublishClient, PublishClipboard
 
 
@@ -11,7 +11,7 @@ def test_api_requires_local_session_and_origin_and_rejects_extra_fields(tmp_path
     with client(tmp_path) as c:
         headers=auth(c)
         path=f'/api/infox-runs/{run.id}/publications'
-        body={'intent_id':str(uuid4()),'market_date':'2026-11-04'}
+        body={'intent_id':str(uuid4()),'market_date':'2026-11-04','review_confirmed':True,'reviewed_remote_updated_at':'2026-11-04T00:00:00Z'}
         assert c.post(path,json=body).status_code==403
         assert c.post(path,headers={**headers,'Origin':'https://evil.invalid'},json=body).status_code==403
         result=c.post(path,headers=headers,json={**body,'video_id':'secret','privacy':'public'})
@@ -28,8 +28,8 @@ def test_reload_get_is_read_only_and_duplicate_post_returns_existing_publication
         headers=auth(c); path=f'/api/infox-runs/{run.id}/publications'
         preview=c.get(path+'/preview',headers=headers)
         assert preview.status_code==200 and preview.json()=={'available':True,'charged':True,
-            'can_start':True,'blocked_reason':None,'latest_publication_id':None,'has_remote_render':False}
-        body={'intent_id':str(uuid4()),'market_date':'2026-11-04'}
+            'can_start':True,'blocked_reason':None,'latest_publication_id':None,'has_remote_render':False,'remote_updated_at':'2026-11-04T00:00:00Z'}
+        body={'intent_id':str(uuid4()),'market_date':'2026-11-04','review_confirmed':True,'reviewed_remote_updated_at':'2026-11-04T00:00:00Z'}
         first=c.post(path,headers=headers,json=body)
         assert first.status_code==202, first.text
         id=first.json()['id']
@@ -72,7 +72,7 @@ def test_rerender_api_is_guarded_and_history_keeps_both_attempts(tmp_path):
         c.app.state.infox_publications.client_factory=lambda:fake
         c.app.state.infox_publications.clipboard=PublishClipboard()
         headers=auth(c);path=f'/api/infox-runs/{first.run_id}/publications'
-        body={'intent_id':str(uuid4()),'market_date':'2026-11-04','previous_publication_id':first.id}
+        body={'intent_id':str(uuid4()),'market_date':'2026-11-04','review_confirmed':True,'reviewed_remote_updated_at':'2026-11-04T00:00:00Z','previous_publication_id':first.id}
         assert c.post(path+'/rerender',json=body).status_code==403
         assert c.post(path+'/rerender',headers=headers,json={**body,'video_id':'wrong'}).status_code==422
         response=c.post(path+'/rerender',headers=headers,json=body)

@@ -31,6 +31,7 @@ class RunManager:
 
     async def start(self, run_id: str, *, recovery: bool = False) -> RunRecord:
         record = self.store.get(run_id)
+        self._automation_allowed(record)
         if self.active(run_id):
             return record
         if record.stage in SAVE_STAGES or record.asset_save.state not in ('not_started', 'saved_verified', 'unchanged_verified'):
@@ -56,6 +57,7 @@ class RunManager:
 
     async def save(self, run_id: str) -> RunRecord:
         record = self.store.get(run_id)
+        self._automation_allowed(record)
         if record.asset_save.state in ('saved_verified', 'unchanged_verified'):
             return record
         if self.active(run_id):
@@ -113,6 +115,7 @@ class RunManager:
 
     async def audit(self, run_id: str) -> RunRecord:
         record = self.store.get(run_id)
+        self._automation_allowed(record)
         if self.active(run_id):
             if record.stage in ('draft_ready', 'auditing_assets', 'assets_audited'):
                 return record
@@ -126,6 +129,7 @@ class RunManager:
 
     async def plan(self,run_id: str) -> RunRecord:
         record=self.store.get(run_id)
+        self._automation_allowed(record)
         if self.active(run_id):
             if record.stage in ('assets_audited','selecting_favorites','replacement_planned'):
                 return record
@@ -135,6 +139,17 @@ class RunManager:
         claimed=self.store.begin_plan(run_id,expected_version=record.version)
         self.tasks[run_id]=asyncio.create_task(self._plan_execute(claimed))
         return claimed
+
+    @staticmethod
+    def _automation_allowed(record):
+        if record.review_mode == 'manual_review':
+            raise RunError('manual_review_active')
+
+    def manual_review(self, run_id, expected_version):
+        from .review import enter_manual_review
+        if self.active(run_id):
+            raise RunError('production_active')
+        return enter_manual_review(self.store, run_id, expected_version)
 
     async def _plan_execute(self,r):
         try:

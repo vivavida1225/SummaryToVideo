@@ -11,7 +11,7 @@ import InfoXProgress from './components/InfoXProgress.vue'
 import InfoXDownloads from './components/InfoXDownloads.vue'
 import InfoXPublishing from './components/InfoXPublishing.vue'
 import InfoXStep from './components/InfoXStep.vue'
-import { EditorNavigation, editorEligible, editorUrl } from './infoxEditor'
+import { EditorNavigation, editorEligible, editorUrl, manualReviewAvailable } from './infoxEditor'
 import { assetSummary, currentStep, infoxActiveStages, infoxSteps, productionProgress, publicationProgress, runTracking,
   stepStatusLabels, type InfoxStep, type InfoxStepKey } from './infoxFlow'
 import { PublishingControl, formatPublishMetadata, publishErrors, publishStages } from './infoxPublishing'
@@ -68,24 +68,50 @@ const editorNavigation = new EditorNavigation({
 })
 const editorAttempt = editorNavigation.attempt
 const editorMessage = editorNavigation.message
-const editorBusy = computed(() => editorNavigation.busy.value || editorNavigation.navigating.value)
+const editorBusy = computed(() => editorNavigation.busy.value || editorNavigation.navigating.value || publishing.busy.value ||
+  (!!publishing.record.value && !['completed', 'failed', 'needs_attention', 'clipboard_failed'].includes(publishing.record.value.stage)))
 watch(infoxRun, record => { if (record) void editorNavigation.advance(record) })
 
 async function reopenEditor() {
-  if (!infoxRun.value || !editorEligible(infoxRun.value)) return
+  if (!infoxRun.value || !manualReviewAvailable(infoxRun.value) || infoxStarting.value) return
   const record = infoxRun.value
-  await editorNavigation.begin(record.id, 'manual')
-  if (infoxRun.value?.id === record.id) await editorNavigation.advance(infoxRun.value)
+  editorNavigation.reserve()
+  infoxStarting.value = true
+  try {
+    if (record.review_mode !== 'manual_review' && record.can_enter_manual_review !== undefined) {
+      const updated = await withInfoxSession(() => api.manualReviewInfox(record.id, record.version))
+      if (infoxRun.value?.id !== record.id) { editorNavigation.release(); return }
+      infoxRun.value = updated
+    }
+    await editorNavigation.begin(record.id, 'manual')
+    if (infoxRun.value?.id === record.id) await editorNavigation.advance(infoxRun.value)
+  } catch (error) {
+    editorNavigation.release()
+    infoxError.value = friendlyError(error)
+    try {
+      const latest = await withInfoxSession(() => api.infoxRun(record.id))
+      if (infoxRun.value?.id === record.id) infoxRun.value = latest
+    } catch { /* Keep the warning; never repeat the handoff or production automatically. */ }
+  } finally { infoxStarting.value = false }
 }
 // Owned here so step layout changes never dispose it or replay its requests.
 const publishing = new PublishingControl(api)
 const publishingRunId = computed(() => infoxRun.value?.video_id ? infoxRun.value.id : null)
-const infoxEditorReady = computed(() => !!infoxRun.value && editorEligible(infoxRun.value))
+const infoxEditorReady = computed(() => !!infoxRun.value && (infoxRun.value.can_prepare_publication ?? editorEligible(infoxRun.value)))
 watch(publishingRunId, id => {
   if (id) void publishing.restore(id, infoxEditorReady.value)
   else publishing.dispose()
 })
 watch(infoxEditorReady, eligible => { if (publishingRunId.value) void publishing.setEligibility(eligible) })
+watch(() => publishing.record.value?.stage, async stage => {
+  const run = infoxRun.value
+  if (!run || !stage || !['completed', 'failed', 'needs_attention', 'clipboard_failed'].includes(stage)) return
+  if (run.can_prepare_publication !== false) return
+  try {
+    const latest = await withInfoxSession(() => api.infoxRun(run.id))
+    if (infoxRun.value?.id === run.id) infoxRun.value = latest
+  } catch { /* The existing publication and its read-only history remain available. */ }
+})
 let infoxPollTimer: number | undefined
 let editorTabTimer: number | undefined
 const infoxStageLabels: Record<string, string> = {
@@ -806,6 +832,7 @@ interface InfoxAction { key: string; label: string; disabled: boolean; run: () =
 const infoxManualActions = computed<InfoxAction[]>(() => {
   const run = infoxRun.value
   if (!run || infoxPending.value) return []
+  if (run.review_mode === 'manual_review') return []
   const locked = inputBusy.value || infoxLoading.value || infoxStarting.value
   const tracked = locked || !!run.tracking_active
   const unsaved = !run.asset_save || run.asset_save.state === 'not_started'
@@ -841,6 +868,7 @@ const publishStartBlocker = computed(() => {
   if (charge?.blocked_reason) return publishErrors[charge.blocked_reason] ?? '게시 조건을 확인하지 못했습니다. 다시 준비하세요.'
   if (!charge?.available) return '렌더 이용량을 확인하지 못해 시작할 수 없습니다. 화면을 새로고침해 다시 확인하세요.'
   if (!charge.can_start) return '게시 시작 조건을 충족하지 못했습니다.'
+  if (!publishing.reviewConfirmed.value) return 'InfoX에서 검토·수정 후 저장했는지 확인란에 체크하세요.'
   return ''
 })
 
@@ -854,6 +882,10 @@ const infoxPrimary = computed<PrimaryAction | null>(() => {
   if (!run) {
     return { key: 'begin', label: 'InfoX 영상 제작 시작', busyLabel: '제작을 준비하는 중…', hint: infoxStartBlocker.value,
       disabled: !!infoxStartBlocker.value || inputBusy.value || infoxStarting.value, run: beginInfoxProduction }
+  }
+  if (manualReviewAvailable(run) && run.review_mode === 'automatic') {
+    return { key: 'review', label: 'InfoX에서 검토·수정', hint: '',
+      disabled: infoxStarting.value || editorBusy.value, run: () => { void reopenEditor() } }
   }
   const manual = infoxManualActions.value[0]
   if (manual) {
@@ -885,7 +917,7 @@ const infoxHeadline = computed(() => {
   const run = infoxRun.value
   if (infoxPending.value) return '이전 확정 요청 확인 필요'
   if (!run) return infoxStarting.value ? '대본 저장·전송본 확정 중' : '전송본 확정 전'
-  if (infoxStep.value.produce.status !== 'done') return infoxStageLabels[run.stage] ?? run.stage
+  if (infoxCurrent.value.key === 'produce') return infoxStageLabels[run.stage] ?? run.stage
   const record = publishing.record.value
   if (!record || publishing.preparing.value) return publishing.loading.value ? '게시 기록 확인 중' : '편집 후 게시 대기'
   if (record.stage === 'completed') return '게시 완료 · 링크 확인 가능'
@@ -910,7 +942,7 @@ const infoxNext = computed(() => {
   }
   const record = publishing.record.value
   if (step.key === 'publish') {
-    if (!record || publishing.preparing.value) return 'InfoX 편집기에서 편집하고 저장한 뒤 렌더와 일부공개 업로드를 시작하세요.'
+    if (!record || publishing.preparing.value) return 'InfoX에서 에셋·장면·자막·음성을 검토하고 필요한 항목을 교체해 저장한 뒤, 검토 완료를 확인하고 게시하세요.'
     if (step.status === 'active') return '렌더와 업로드를 자동으로 진행합니다. 실행 중에는 편집을 계속하지 마세요.'
     return '원인을 확인한 뒤 필요하면 새 회차 렌더·업로드를 준비하세요.'
   }
@@ -1177,7 +1209,7 @@ const infoxEditorStatusVisible = computed(() => !!editorAttempt.value || !!edito
               <div class="infox-panel-secondary">
                 <button v-if="infoxRun && infoxCurrent.key === 'produce' && runTracking(infoxRun)" type="button" class="ghost-button"
                   @click="pollInfox(infoxRun.id)">진행 상태 다시 조회</button>
-                <a v-if="infoxRun && editorUrl(infoxRun)" class="ghost-button" :href="editorUrl(infoxRun)!" target="_blank" rel="noopener noreferrer">InfoX 편집 화면 수동 열기</a>
+                <a v-if="infoxRun && editorEligible(infoxRun) && !editorBusy && editorUrl(infoxRun)" class="ghost-button" :href="editorUrl(infoxRun)!" target="_blank" rel="noopener noreferrer">InfoX 편집 화면 수동 열기</a>
               </div>
               <p v-if="infoxEditorStatusVisible" class="infox-panel-editor" role="status">편집기 탭: {{ editorMessage }}</p>
             </aside>
@@ -1259,13 +1291,15 @@ const infoxEditorStatusVisible = computed(() => !!editorAttempt.value || !!edito
                 </template>
               </InfoXStep>
 
-              <InfoXStep :step="infoxStep.publish" :current="infoxCurrent.key === 'publish'" :summary="infoxSummaries.publish">
+              <InfoXStep :step="infoxStep.publish" :current="infoxCurrent.key === 'publish'" :summary="infoxSummaries.publish"
+                :force-open="!!infoxRun?.video_id && !!infoxRun?.tracking_active">
                 <template v-if="infoxRun?.video_id">
                   <section class="infox-editor" aria-label="편집기 브라우저 이동">
                     <h5>InfoX 편집기</h5>
-                    <p>편집기에서 장면·자막을 확인하고 저장하세요. 저장한 최신 편집본으로 렌더합니다.</p>
+                    <p>에셋·장면·자막·음성을 직접 검토하고 필요한 항목을 교체한 뒤 InfoX에서 저장하세요. 2단계 자동 검증 경고가 있어도 수기 검토 후 게시할 수 있습니다.</p>
+                    <p v-if="infoxRun.review_blocked_reason">{{ infoxRun.review_blocked_reason === 'request_unconfirmed' ? '기존 요청의 접수 결과를 먼저 확인하세요.' : infoxRun.review_blocked_reason === 'publication_active' ? '렌더·업로드 작업이 끝난 뒤 편집할 수 있습니다.' : '제작·저장 작업이 끝나면 수기 검토로 전환할 수 있습니다.' }}</p>
                     <div class="infox-actions">
-                      <button v-if="editorEligible(infoxRun)" type="button" class="ghost-button" :disabled="editorBusy" @click="reopenEditor">편집기 다시 열기</button>
+                      <button v-if="manualReviewAvailable(infoxRun)" type="button" class="ghost-button" :disabled="editorBusy || infoxStarting" @click="reopenEditor">{{ infoxRun.review_mode === 'automatic' ? '수기 검토로 전환하고 편집기 열기' : '편집기 다시 열기' }}</button>
                       <template v-if="editorAttempt && ['navigation_requested', 'login_required', 'ready_reported'].includes(editorAttempt.state)">
                         <button type="button" class="ghost-button" :disabled="editorBusy" @click="editorNavigation.report('login_required')">로그인 필요 상태 기록</button>
                         <button type="button" class="ghost-button" :disabled="editorBusy" @click="editorNavigation.report('failed')">이동 실패 상태 기록</button>

@@ -85,6 +85,12 @@ export interface InfoXRun {
   requires_reconciliation: boolean
   tracking_active?: boolean
   continuation?: 'manual' | 'automatic'
+  review_mode?: 'automatic' | 'manual_review'
+  manual_review_started_at?: string | null
+  can_enter_manual_review?: boolean
+  can_open_editor?: boolean
+  can_prepare_publication?: boolean
+  review_blocked_reason?: string | null
   asset_audit?: InfoXAssetAudit
   asset_counts?: Record<string, number>
   replacement_plan?: InfoXReplacementPlan
@@ -144,7 +150,8 @@ export interface PublicationRecord {
   failed_stage: string | null
   error_code: string | null
   progress: number | null
-  snapshot: { market_date: string; title: string; description: string; privacy_status: 'unlisted' }
+  snapshot: { market_date: string; title: string; description: string; privacy_status: 'unlisted'
+    review_confirmed_at?: string | null; reviewed_remote_updated_at?: string | null; review_warning_codes?: string[] }
   uploaded_verified: boolean
   youtube_video_id: string | null
   share_url: string | null
@@ -168,9 +175,10 @@ export interface DownloadRecord {
   items: DownloadItem[]
   error_code: string | null
 }
-export interface PublishInput { intent_id: string; market_date: string }
+export interface PublishInput { intent_id: string; market_date: string; review_confirmed?: boolean; reviewed_remote_updated_at?: string }
 export interface RerenderInput extends PublishInput { previous_publication_id: string }
 export interface PublishCharge {
+  remote_updated_at?: string | null
   available: boolean; charged: boolean | null; credits?: number; duration_seconds?: number
   can_start: boolean; blocked_reason: string | null; latest_publication_id: string | null; has_remote_render: boolean
 }

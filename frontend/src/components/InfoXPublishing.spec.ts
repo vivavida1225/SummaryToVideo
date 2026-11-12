@@ -47,8 +47,11 @@ it('clipboard_failure_keeps_the_upload_record_without_restarting', async () => {
 
 it('previews_fixed_metadata_and_charge_before_start', async () => {
   vi.mocked(api.latestInfoxPublication).mockResolvedValue({publication:null})
-  vi.mocked(api.infoxPublicationPreview).mockResolvedValue({available:true,charged:true,credits:3,duration_seconds:61,can_start:true,blocked_reason:null,latest_publication_id:null,has_remote_render:false})
+  vi.mocked(api.infoxPublicationPreview).mockResolvedValue({available:true,charged:true,credits:3,duration_seconds:61,can_start:true,blocked_reason:null,latest_publication_id:null,has_remote_render:false,remote_updated_at:'2026-11-04T00:00:00Z'})
   mount()
+  await waitFor(()=>expect(control.loading.value).toBe(false))
+  expect(control.canStart.value).toBe(false)
+  await fireEvent.click(screen.getByRole('checkbox',{name:'InfoX에서 검토·수정 후 저장했으며, 현재 영상으로 게시합니다'}))
   await waitFor(()=>expect(control.canStart.value).toBe(true))
   expect(screen.getByText('261104 AI 영상 시황')).toBeInTheDocument()
   expect(screen.getByText(/과금 대상 · 예상 차감 크레딧 3 · 영상 길이 61초/)).toBeInTheDocument()
@@ -58,7 +61,7 @@ it('previews_fixed_metadata_and_charge_before_start', async () => {
 it('keeps_an_edited_date_when_the_same_run_becomes_editor_ready', async () => {
   vi.mocked(api.latestInfoxPublication).mockResolvedValue({publication:null})
   vi.mocked(api.infoxPublicationPreview).mockClear()
-  vi.mocked(api.infoxPublicationPreview).mockResolvedValue({available:true,charged:true,can_start:true,blocked_reason:null,latest_publication_id:null,has_remote_render:false})
+  vi.mocked(api.infoxPublicationPreview).mockResolvedValue({available:true,charged:true,can_start:true,blocked_reason:null,latest_publication_id:null,has_remote_render:false,remote_updated_at:'2026-11-04T00:00:00Z'})
   const pending = {...run,stage:'generating',asset_save:{state:'not_started'}} as InfoXRun
   const {rerender}=mount(pending, false)
   await waitFor(()=>expect(api.latestInfoxPublication).toHaveBeenCalled())
@@ -67,6 +70,9 @@ it('keeps_an_edited_date_when_the_same_run_becomes_editor_ready', async () => {
   await fireEvent.update(screen.getByLabelText('게시 기준일'),'2026-11-03')
   await rerender({run, control})
   await control.setEligibility(true)
+  await waitFor(()=>expect(control.loading.value).toBe(false))
+  expect(control.canStart.value).toBe(false)
+  await fireEvent.click(screen.getByRole('checkbox',{name:'InfoX에서 검토·수정 후 저장했으며, 현재 영상으로 게시합니다'}))
   await waitFor(()=>expect(control.canStart.value).toBe(true))
   expect(screen.getByLabelText('게시 기준일')).toHaveValue('2026-11-03')
 })
@@ -75,7 +81,7 @@ it('shows_history_and_cancels_a_prepared_rerender_without_sending_it', async () 
   const old={...result,stage:'completed',attempt_number:1,uploaded_verified:true,share_url:'https://youtu.be/abcdefghijk'}
   vi.mocked(api.latestInfoxPublication).mockResolvedValue({publication:old} as never)
   vi.mocked(api.infoxPublicationHistory).mockResolvedValue({publications:[old]} as never)
-  vi.mocked(api.infoxPublicationPreview).mockResolvedValue({available:true,charged:false,can_start:true,blocked_reason:null,latest_publication_id:old.id,has_remote_render:true})
+  vi.mocked(api.infoxPublicationPreview).mockResolvedValue({available:true,charged:false,can_start:true,blocked_reason:null,latest_publication_id:old.id,has_remote_render:true,remote_updated_at:'2026-11-04T00:00:00Z'})
   mount()
   await waitFor(()=>expect(control.canPrepare.value).toBe(true))
   await control.prepareNew()

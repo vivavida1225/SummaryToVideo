@@ -28,8 +28,8 @@ class EditorUpdate(BaseModel):
 
 
 def editor_ready(r):
-    return (r.stage == 'ready_for_editor' and r.asset_save.state in ('saved_verified', 'unchanged_verified')
-            and not r.requires_reconciliation and r.video_id is not None)
+    from .review import publication_ready
+    return publication_ready(r)
 
 
 class EditorStoreMixin:
@@ -50,6 +50,9 @@ class EditorStoreMixin:
         self._run_id(run_id)
         with self._transaction() as conn:
             r = self._decode(conn.execute('SELECT record FROM runs WHERE id=?', (run_id,)).fetchone())
+            from .review import publication_active
+            if publication_active(conn, r.video_id):
+                raise RunError('publication_active')
             self._editor_table(conn)
             row = conn.execute('SELECT run_id, record FROM editor_attempts WHERE id=?', (claim.attempt_id,)).fetchone()
             if row:
@@ -84,6 +87,9 @@ class EditorStoreMixin:
                 raise RunError('record_conflict')
             state, previous = update.state, attempt['state']
             if state == 'navigate_intent':
+                from .review import publication_active
+                if publication_active(conn, r.video_id):
+                    raise RunError('publication_active')
                 if not editor_ready(r):
                     raise RunError('editor_not_ready')
                 if previous != 'waiting' or attempt['tab_state'] != 'created':

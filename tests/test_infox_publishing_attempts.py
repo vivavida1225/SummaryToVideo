@@ -13,7 +13,7 @@ from tests.test_infox_publishing_store import setup_publication
 
 def rerender_input(previous):
     from backend.infox.publishing.models import RerenderInput
-    return RerenderInput(intent_id=str(uuid4()), market_date=previous.snapshot.market_date,
+    return RerenderInput(review_confirmed=True, reviewed_remote_updated_at='2026-11-04T00:00:00Z', intent_id=str(uuid4()), market_date=previous.snapshot.market_date,
                          previous_publication_id=previous.id)
 
 
@@ -28,7 +28,7 @@ def test_new_attempt_preserves_history_and_old_intent(tmp_path):
     assert store.for_run(first.run_id).id == second.id
     assert [r.id for r in store.history(first.run_id)] == [second.id, first.id]
     assert store.get(first.id) == first
-    assert store.create_or_get(first.run_id, PublishInput(intent_id=str(uuid4()), market_date='2026-11-04')) == (second, False)
+    assert store.create_or_get(first.run_id, PublishInput(review_confirmed=True, reviewed_remote_updated_at='2026-11-04T00:00:00Z', intent_id=str(uuid4()), market_date='2026-11-04')) == (second, False)
 
 
 def test_concurrent_new_intents_create_only_one_attempt(tmp_path):
@@ -57,7 +57,7 @@ def test_active_attempt_and_stale_previous_are_rejected(tmp_path):
 
 
 def test_legacy_migration_preserves_external_references_and_backup(tmp_path):
-    from tests.test_infox_editor import verified
+    from tests.infox_publishing_fakes import reviewed as verified
     from backend.infox.publishing.models import PublicationRecord, PublishSnapshot
     from backend.infox.publishing.store import PublicationStore
     runs, run = verified(tmp_path)
@@ -168,7 +168,7 @@ def test_observed_rerender_fixture_preserves_task_and_file_identity(tmp_path):
 
 
 def test_migration_failure_rolls_back_without_losing_original_rows(tmp_path):
-    from tests.test_infox_editor import verified
+    from tests.infox_publishing_fakes import reviewed as verified
     from backend.infox.publishing.store import PublicationStore
     runs,run=verified(tmp_path)
     db=tmp_path/'.runtime/infox-runs.sqlite3'

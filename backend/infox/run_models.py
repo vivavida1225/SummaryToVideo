@@ -139,6 +139,8 @@ class RunRecord(StrictModel):
     asset_save: AssetSave = Field(default_factory=AssetSave)
     # Legacy records and explicit audit/plan operations are read-only by default.
     continuation: Literal['manual', 'automatic'] = 'manual'
+    review_mode: Literal['automatic', 'manual_review'] = 'automatic'
+    manual_review_started_at: str | None = None
 
     @property
     def requires_reconciliation(self) -> bool:
@@ -152,6 +154,7 @@ def text_hash(text: str) -> str:
 
 
 def public_record(record: RunRecord) -> dict:
+    from .review import review_capabilities
     editor = f'https://infox2.infomaxai.com/studio/library/videos/{record.video_id}?chatboxView=script' if record.video_id else None
-    return {**record.model_dump(mode='json'), 'requires_reconciliation': record.requires_reconciliation,
+    return {**record.model_dump(mode='json'), **review_capabilities(record), 'requires_reconciliation': record.requires_reconciliation,
             'editor_url': editor, 'asset_counts': record.asset_audit.counts()}

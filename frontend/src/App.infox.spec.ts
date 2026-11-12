@@ -51,6 +51,60 @@ function fakeTab() {
 const claimed = (body: string) => json({ claimed: true, attempt: { id: JSON.parse(body).attempt_id, run_id: RUN_ID, version: 0,
   state: 'waiting', mode: 'automatic', video_id: null, editor_url: null, editor_status: 'unconfirmed' } })
 
+it('2단계 경고를 보존하고 수기 전환 후 확인한 최신 영상으로 게시한다', async () => {
+  sessionStorage.clear(); localStorage.clear(); sessionStorage.setItem('market-compressor.job-id', 'job-1')
+  const tab = fakeTab()
+  vi.spyOn(window, 'open').mockReturnValue(tab as never)
+  let current: Record<string, unknown> = makeRun({ stage:'needs_attention', version:7, review_mode:'automatic', video_id:'video-1',
+    task_id:'task-1', tracking_active:false, can_enter_manual_review:true, can_open_editor:false,
+    can_prepare_publication:false, tracking:{completion_seen:true,task_status:'completed',progress:100},
+    replacement_plan:{state:'needs_attention',error_code:'source_changed',selections:[]} })
+  let posted: Record<string, unknown> | undefined
+  const { posts } = install((p, init) => {
+    if(p === '/api/jobs/job-1') return json(makeJob())
+    if(p === '/api/jobs/job-1/infox-runs') return json({run:current})
+    if(p.endsWith('/manual-review')) {
+      current = {...current, review_mode:'manual_review', version:8,can_open_editor:true,can_prepare_publication:true}
+      return json(current)
+    }
+    if(p.endsWith('/editor-attempts')) return init.method==='POST' ? claimed(String(init.body)) : json({attempt:null})
+    if(p.includes('/editor-attempts/')) {
+      const update=JSON.parse(String(init.body))
+      return json({id:p.split('/').at(-1),run_id:RUN_ID,version:update.expected_version+1,state:update.state,
+        video_id:'video-1',editor_url:'https://infox2.infomaxai.com/studio/library/videos/video-1?chatboxView=script'})
+    }
+    if(p.endsWith('/publications/history')) return json({publications:[]})
+    if(p.endsWith('/publications/preview')) return json({available:true,charged:true,can_start:true,
+      blocked_reason:null,latest_publication_id:null,has_remote_render:false,remote_updated_at:'2026-11-12T06:43:40Z'})
+    if(p.endsWith('/publications')) {
+      if(init.method!=='POST') return json({publication:null})
+      posted=JSON.parse(String(init.body))
+      return json({id:'pub-new',run_id:RUN_ID,video_id:'video-1',attempt_number:1,stage:'rendering',progress:42,
+        snapshot:{market_date:'2026-11-12',title:'title',description:'description'},uploaded_verified:false})
+    }
+    if(p.endsWith('/downloads')) return json({downloads:[]})
+    throw new Error(`unexpected ${p}`)
+  })
+  const view=render(App)
+  try {
+    const panel=await screen.findByRole('complementary',{name:'InfoX 현재 상태와 다음 행동'})
+    const open=await within(panel).findByRole('button',{name:'InfoX에서 검토·수정'})
+    expect(within(panel).queryByRole('link',{name:'InfoX 편집 화면 수동 열기'})).not.toBeInTheDocument()
+    expect(screen.getByRole('region',{name:'InfoX 수기 검토·수정·게시'})).toHaveAttribute('data-current','true')
+    await fireEvent.click(open)
+    await waitFor(()=>expect(tab.location.replace).toHaveBeenCalled())
+    expect(await within(panel).findByRole('link',{name:'InfoX 편집 화면 수동 열기'})).toBeVisible()
+    const publish=await within(panel).findByRole('button',{name:'편집 완료 · 렌더 및 유튜브 업로드'})
+    expect(publish).toBeDisabled()
+    await fireEvent.click(screen.getByRole('checkbox',{name:'InfoX에서 검토·수정 후 저장했으며, 현재 영상으로 게시합니다'}))
+    await waitFor(()=>expect(publish).toBeEnabled())
+    await fireEvent.click(publish)
+    await waitFor(()=>expect(posted).toMatchObject({review_confirmed:true,reviewed_remote_updated_at:'2026-11-12T06:43:40Z'}))
+    expect(screen.getByRole('region',{name:'자동 제작·검사'})).toHaveAttribute('data-status','attention')
+    expect(posts.some(p=>p.endsWith('/start') || p.endsWith('/save-assets'))).toBe(false)
+  } finally { view.unmount(); vi.unstubAllGlobals(); vi.restoreAllMocks() }
+})
+
 describe('InfoX 통합 제작 시작', { timeout: 15000 }, () => {
   beforeEach(() => { sessionStorage.clear(); localStorage.clear(); sessionStorage.setItem('market-compressor.job-id', 'job-1') })
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
@@ -209,7 +263,7 @@ describe('InfoX 단계형 화면', { timeout: 15000 }, () => {
     uploaded_verified: true, youtube_video_id: 'abcdefghijk', share_url: 'https://youtu.be/abcdefghijk', clipboard_state: 'copied', ...overrides })
 
   function installReady(latest: unknown, preview = { available: true, charged: true, can_start: true, blocked_reason: null,
-    latest_publication_id: null, has_remote_render: false }, downloads: unknown[] = []) {
+    latest_publication_id: null, has_remote_render: false, remote_updated_at: '2026-11-04T00:00:00Z' }, downloads: unknown[] = []) {
     return install((p, init) => {
       if (p === '/api/infox-publications/pub-1/downloads') return json({ downloads })
       if (p === '/api/jobs/job-1/infox-runs') return json({ run: ready })
@@ -232,12 +286,12 @@ describe('InfoX 단계형 화면', { timeout: 15000 }, () => {
     const link = await screen.findByRole('link', { name: 'https://youtu.be/abcdefghijk' })
     expect(link).toBeVisible()
     const toggles = screen.getAllByRole('button', { name: /^펼치기/ })
-    expect(toggles.map(button => button.textContent?.trim())).toEqual(['펼치기 제작 준비', '펼치기 자동 제작', '펼치기 편집 및 게시'])
+    expect(toggles.map(button => button.textContent?.trim())).toEqual(['펼치기 제작 준비', '펼치기 자동 제작·검사', '펼치기 InfoX 수기 검토·수정·게시'])
     expect(screen.getByText('기업명 검출 1 · 확인 불가 1 · 교체 0 · 교체 저장·검증 완료')).toBeVisible()
     // Detailed per-scene evidence stays folded even after the step is expanded.
     expect(screen.getByText('삼성전자 · tags[0]')).not.toBeVisible()
-    await fireEvent.click(screen.getByRole('button', { name: '펼치기 자동 제작' }))
-    expect(screen.getByRole('button', { name: '접기 자동 제작' })).toHaveAttribute('aria-expanded', 'true')
+    await fireEvent.click(screen.getByRole('button', { name: '펼치기 자동 제작·검사' }))
+    expect(screen.getByRole('button', { name: '접기 자동 제작·검사' })).toHaveAttribute('aria-expanded', 'true')
     expect(screen.getByText('삼성전자 · tags[0]')).not.toBeVisible()
     await fireEvent.click(screen.getByText('장면별 검사·교체 근거'))
     expect(screen.getByText('삼성전자 · tags[0]')).toBeVisible()
@@ -249,6 +303,9 @@ describe('InfoX 단계형 화면', { timeout: 15000 }, () => {
     render(App)
     const panel = await screen.findByRole('complementary', { name: 'InfoX 현재 상태와 다음 행동' })
     const button = await within(panel).findByRole('button', { name: '편집 완료 · 렌더 및 유튜브 업로드' })
+    expect(button).toBeDisabled()
+    await waitFor(() => expect(screen.getByRole('checkbox', { name: 'InfoX에서 검토·수정 후 저장했으며, 현재 영상으로 게시합니다' })).toBeEnabled())
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'InfoX에서 검토·수정 후 저장했으며, 현재 영상으로 게시합니다' }))
     await waitFor(() => expect(button).toBeEnabled())
     expect(screen.getAllByRole('button', { name: '편집 완료 · 렌더 및 유튜브 업로드' })).toHaveLength(1)
     expect(screen.getByLabelText('InfoX 영상 제목')).not.toBeVisible()
@@ -300,7 +357,7 @@ describe('InfoX 단계형 화면', { timeout: 15000 }, () => {
     render(App)
     expect(await screen.findByText('렌더 완료 영상 자동 다운로드')).toBeVisible()
     expect(screen.getAllByRole('region', { name: '파일 다운로드', hidden: true })).toHaveLength(1)
-    expect(screen.getByRole('region', { name: '편집 및 게시' })).toContainElement(screen.getByRole('region', { name: '파일 다운로드' }))
+    expect(screen.getByRole('region', { name: 'InfoX 수기 검토·수정·게시' })).toContainElement(screen.getByRole('region', { name: '파일 다운로드' }))
     expect(screen.queryByRole('button', { name: '대본·원본·영상 3개 파일 다운로드' })).not.toBeInTheDocument()
   })
 })

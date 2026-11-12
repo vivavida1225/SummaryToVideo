@@ -8,6 +8,10 @@ const step = (status: InfoxStep['status']): InfoxStep => ({ key: 'produce', numb
 const slots = { default: () => h('input', { 'aria-label': '기록 입력' }) }
 
 describe('InfoXStep', () => {
+  it('진행 중인 앞 단계 때문에 대기 중인 수기 검토 안내도 펼쳐 볼 수 있다', () => {
+    render(InfoXStep, { props: { step: step('waiting'), current: false, forceOpen: true }, slots })
+    expect(screen.getByRole('textbox', { name: '기록 입력' })).toBeVisible()
+  })
   it('완료 단계는 요약만 보이고, 사용자가 펼친 기록은 상태 갱신 후에도 접지 않는다', async () => {
     const view = render(InfoXStep, { props: { step: step('active'), current: true, summary: '요약 한 줄' }, slots })
     const input = screen.getByRole('textbox', { name: '기록 입력' })

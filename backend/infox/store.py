@@ -91,7 +91,7 @@ class RunStore(SaveStoreMixin, EditorStoreMixin):
     def resumable(self) -> list[RunRecord]:
         with self._transaction() as conn:
             return [record for row in conn.execute('SELECT record FROM runs')
-                    if ((record := self._decode(row)).stage not in
+                    if (record := self._decode(row)).review_mode != 'manual_review' and (record.stage not in
                     ('prepared', 'draft_ready', 'assets_audited', 'replacement_planned', 'ready_for_editor', 'failed', 'needs_attention')
                     or (record.continuation == 'automatic' and record.stage in
                         ('draft_ready', 'assets_audited', 'replacement_planned')))]
@@ -215,6 +215,8 @@ class RunStore(SaveStoreMixin, EditorStoreMixin):
         self._run_id(run_id)
         with self._transaction() as conn:
             record = self._decode(conn.execute('SELECT record FROM runs WHERE id=?', (run_id,)).fetchone())
+            if record.review_mode == 'manual_review':
+                raise RunError('manual_review_active')
             if type(expected_version) is not int or expected_version != record.version:
                 raise RunError('record_conflict', run_id=run_id)
             data = record.model_dump()

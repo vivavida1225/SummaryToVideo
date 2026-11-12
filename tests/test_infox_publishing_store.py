@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from backend.infox.run_models import RunError
 from backend.infox.store import RunStore
-from tests.test_infox_editor import verified
+from tests.infox_publishing_fakes import reviewed as verified
 
 
 def setup_publication(root):
@@ -15,7 +15,7 @@ def setup_publication(root):
     from backend.infox.publishing.models import PublishInput
     runs, run = verified(root)
     store = PublicationStore(runs)
-    record, created = store.create_or_get(run.id, PublishInput(intent_id=str(uuid4()), market_date='2026-11-04'))
+    record, created = store.create_or_get(run.id, PublishInput(review_confirmed=True, reviewed_remote_updated_at='2026-11-04T00:00:00Z', intent_id=str(uuid4()), market_date='2026-11-04'))
     assert created
     return store, record
 
@@ -33,7 +33,7 @@ def test_duplicate_tabs_share_one_publication(tmp_path):
     from backend.infox.publishing.models import PublishInput
     runs, run = verified(tmp_path)
     def create(_):
-        return PublicationStore(RunStore(tmp_path)).create_or_get(run.id, PublishInput(intent_id=str(uuid4()), market_date='2026-11-04'))
+        return PublicationStore(RunStore(tmp_path)).create_or_get(run.id, PublishInput(review_confirmed=True, reviewed_remote_updated_at='2026-11-04T00:00:00Z', intent_id=str(uuid4()), market_date='2026-11-04'))
     with ThreadPoolExecutor(max_workers=4) as pool:
         results = list(pool.map(create, range(8)))
     assert len({r.id for r, _ in results}) == 1
@@ -66,28 +66,29 @@ def test_intent_body_conflict_and_invalid_inputs(tmp_path):
     from backend.infox.publishing.models import PublishInput
     store, r = setup_publication(tmp_path)
     intent = str(uuid4())
-    body = PublishInput(intent_id=intent, market_date='2026-11-04')
+    body = PublishInput(review_confirmed=True, reviewed_remote_updated_at='2026-11-04T00:00:00Z', intent_id=intent, market_date='2026-11-04')
     assert store.create_or_get(r.run_id, body)[0].id == r.id
     with pytest.raises(RunError, match='intent_conflict'):
-        store.create_or_get(r.run_id, PublishInput(intent_id=intent, market_date='2026-11-05'))
+        store.create_or_get(r.run_id, PublishInput(review_confirmed=True, reviewed_remote_updated_at='2026-11-04T00:00:00Z', intent_id=intent, market_date='2026-11-05'))
     for value in ('20261104', '2026-11-40', 42):
         with pytest.raises(ValidationError):
-            PublishInput(intent_id=str(uuid4()), market_date=value)
+            PublishInput(review_confirmed=True, reviewed_remote_updated_at='2026-11-04T00:00:00Z', intent_id=str(uuid4()), market_date=value)
     with pytest.raises(ValidationError):
-        PublishInput(intent_id=str(uuid4()), market_date='2026-11-04', url='secret')
+        PublishInput(review_confirmed=True, reviewed_remote_updated_at='2026-11-04T00:00:00Z', intent_id=str(uuid4()), market_date='2026-11-04', url='secret')
 
 
-@pytest.mark.parametrize('change', ['stage', 'save', 'reconciliation', 'video'])
+@pytest.mark.parametrize('change', ['mode', 'reconciliation', 'video'])
 def test_not_ready_rolls_back(tmp_path, change):
     from backend.infox.publishing.store import PublicationStore
     from backend.infox.publishing.models import PublishInput
-    runs, run = verified(tmp_path)
+    from tests.test_infox_editor import verified as automatic_run
+    runs, run = automatic_run(tmp_path)
     with runs._edit(run.id, run.version) as (_, data):
-        if change == 'stage': data['stage'] = 'needs_attention'
-        if change == 'save': data['asset_save'] = {}
+        data['review_mode'] = 'manual_review'
+        if change == 'mode': data['review_mode'] = 'automatic'
         if change == 'reconciliation': data['project'] = {'state': 'unknown'}
         if change == 'video': data['video_id'] = None
     store = PublicationStore(runs)
     with pytest.raises(RunError):
-        store.create_or_get(run.id, PublishInput(intent_id=str(uuid4()), market_date='2026-11-04'))
+        store.create_or_get(run.id, PublishInput(review_confirmed=True, reviewed_remote_updated_at='2026-11-04T00:00:00Z', intent_id=str(uuid4()), market_date='2026-11-04'))
     assert store.all() == []

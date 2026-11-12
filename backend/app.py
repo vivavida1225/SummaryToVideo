@@ -194,7 +194,12 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
             'download_not_ready': '자동 3종 저장은 렌더 완료 검증 후 실행됩니다. 수동 3종 다운로드는 업로드 완료 검증 후 사용할 수 있습니다.',
             'download_active': '다운로드가 진행 중입니다. 완료 후 파일별 결과를 확인하세요.',
             'publication_exists': '이 영상의 게시 기록이 이미 있습니다. 기존 기록을 확인하세요.',
-            'editor_not_ready': '영상 저장·검증을 완료한 뒤 실행하세요.',
+            'editor_not_ready': '대상 영상의 제작 상태를 확인하고 수기 검토로 전환하세요.',
+            'manual_review_required': 'InfoX에서 검토·수정 후 저장했는지 확인하고 게시하세요.',
+            'manual_review_active': '수기 검토 중입니다. 편집본 보호를 위해 자동 제작·교체를 재개하지 않습니다.',
+            'production_active': '제작·저장 작업이 진행 중입니다. 작업이 끝난 뒤 수기 검토로 전환하세요.',
+            'request_unconfirmed': '기존 요청의 접수 결과가 불명확합니다. 요청 상태를 먼저 확인하세요.',
+            'record_conflict': '다른 화면에서 실행 상태가 바뀌었습니다. 최신 상태를 다시 확인하세요.',
             'upload_not_verified': '업로드 완료가 확인된 링크만 복사할 수 있습니다.',
             'copy_in_progress': '링크 복사 결과를 확인하는 중입니다.',
             'storage_error': 'InfoX 실행 기록을 읽거나 저장하지 못했습니다. 같은 요청으로 다시 확인하세요.',
@@ -255,7 +260,21 @@ def create_app(settings: Settings | None = None, *, clipboard=None, compressor_f
             raise HTTPException(404, '작업 기록을 찾을 수 없습니다.') from None
 
     def infox_view(record):
-        return {**public_record(record), 'tracking_active': infox_manager.active(record.id)}
+        from .infox.review import review_capabilities, publication_active
+        with infox_runs.store._transaction() as conn:
+            publishing_active = publication_active(conn, record.video_id)
+        capabilities = review_capabilities(record, active=infox_manager.active(record.id))
+        if publishing_active:
+            capabilities.update(can_enter_manual_review=False, can_open_editor=False,
+                                can_prepare_publication=False, review_blocked_reason='publication_active')
+        return {**public_record(record), **capabilities,
+                'tracking_active': infox_manager.active(record.id)}
+
+    from .infox.review import ManualReviewInput
+
+    @app.post('/api/infox-runs/{run_id}/manual-review')
+    async def manual_review_infox_run(run_id: str, data: ManualReviewInput):
+        return infox_view(infox_manager.manual_review(run_id, data.expected_version))
 
     @app.get('/api/jobs/{job_id}')
     async def get_job(job_id: str):

@@ -1,9 +1,11 @@
 import asyncio
 import time
 import math
+from datetime import datetime
 from contextlib import suppress
 
 from ..editor import editor_ready
+from ..review import publication_ready
 from ..errors import InfoXError
 from ..run_models import RunError
 from ..save_models import remote_version
@@ -59,15 +61,17 @@ class PublicationManager:
 
     async def preview(self, run_id):
         run = self.store.run_store.get(run_id)
-        if not editor_ready(run):
+        if not publication_ready(run):
             raise RunError('editor_not_ready')
         latest = self.store.for_run(run_id)
         context = {'can_start': False, 'blocked_reason': None,
-                   'latest_publication_id': latest.id if latest else None, 'has_remote_render': False}
+                   'latest_publication_id': latest.id if latest else None, 'has_remote_render': False,
+                   'remote_updated_at': None}
         try:
             async with self.client_factory() as client:
                 async with asyncio.timeout(self.timeouts.preflight):
-                    _, logs = await self._inspect(client, run, context=context)
+                    version, logs = await self._inspect(client, run, context=context)
+                    context['remote_updated_at'] = version
                     context['has_remote_render'] = any(log['state'] != 'videosgenerationend' for log in logs)
                     result = await self._read(client.render_charge_preview(run.video_id))
             charge = charge_summary(result)
@@ -99,9 +103,13 @@ class PublicationManager:
 
     async def _preflight(self, client, r):
         run = self.store.run_store.get(r.run_id)
-        if not editor_ready(run) or run.video_id != r.video_id:
+        ready = publication_ready(run) if r.snapshot.review_confirmed_at else editor_ready(run)
+        if not ready or run.video_id != r.video_id:
             raise PublishStop('preflight_unconfirmed')
         version, logs = await self._inspect(client, run, r.id)
+        if (r.snapshot.reviewed_remote_updated_at is not None and
+                datetime.fromisoformat(version) != datetime.fromisoformat(r.snapshot.reviewed_remote_updated_at)):
+            raise PublishStop('remote_changed')
         charge = charge_summary(await self._read(client.render_charge_preview(r.video_id)))
         if not charge['available']:
             raise PublishStop('preflight_unconfirmed')
@@ -228,7 +236,8 @@ class PublicationManager:
                     # Latest saved version immediately before first mutation.
                     state = await self._read(client.video_state(r.video_id))
                     if (str(state.get('id')) != r.video_id or state.get('can_edit') is not True
-                            or state.get('updated_at') != r.snapshot.remote_updated_at):
+                            or datetime.fromisoformat(remote_version(state.get('updated_at'))) !=
+                               datetime.fromisoformat(r.snapshot.remote_updated_at)):
                         raise PublishStop('remote_changed')
                     # Re-read history too: another editor may have started rendering.
                     logs = history_logs(await self._read(client.render_logs(r.video_id)), r.video_id)

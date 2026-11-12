@@ -3,7 +3,7 @@ from uuid import uuid4
 
 import pytest
 
-from tests.test_infox_editor import verified
+from tests.infox_publishing_fakes import reviewed as verified
 from tests.infox_publishing_fakes import PublishClient, PublishClipboard, settle
 
 
@@ -16,7 +16,7 @@ def manager_for(root, **kwargs):
     clipboard = PublishClipboard()
     manager = PublicationManager(PublicationStore(runs), lambda:fake, clipboard,
         timeouts=PublishTimeouts(connect=.1,read=1.,preflight=2.,render=2.,metadata=2.,save=2.,upload=2.),poll_interval=.001)
-    return manager, run, fake, clipboard, PublishInput(intent_id=str(uuid4()),market_date='2026-11-04')
+    return manager, run, fake, clipboard, PublishInput(review_confirmed=True, reviewed_remote_updated_at='2026-11-04T00:00:00Z', intent_id=str(uuid4()),market_date='2026-11-04')
 
 
 def test_first_publish_runs_each_operation_once_in_order(tmp_path):

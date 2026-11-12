@@ -9,7 +9,7 @@ const props = defineProps<{ step: InfoxStep; current: boolean; summary?: string;
 const userOpen = ref<boolean | null>(null)
 const autoOpen = computed(() => props.current || !!props.forceOpen ||
   ['action', 'attention', 'failed'].includes(props.step.status))
-const open = computed(() => props.step.status !== 'waiting' && (userOpen.value ?? autoOpen.value))
+const open = computed(() => (props.step.status !== 'waiting' || props.forceOpen) && (userOpen.value ?? autoOpen.value))
 const bodyId = computed(() => `infox-step-${props.step.key}`)
 // A step that newly becomes current is shown again even if the user closed it earlier.
 watch(() => props.current, current => { if (current) userOpen.value = null })
@@ -22,7 +22,7 @@ function toggle() { userOpen.value = !open.value }
       <span class="infox-step-number" aria-hidden="true">{{ step.number }}</span>
       <h4 :id="bodyId + '-title'">{{ step.title }}</h4>
       <span class="infox-badge" :data-status="step.status">{{ stepStatusLabels[step.status] }}</span>
-      <button v-if="step.status !== 'waiting'" type="button" class="infox-step-toggle"
+      <button v-if="step.status !== 'waiting' || forceOpen" type="button" class="infox-step-toggle"
         :aria-expanded="open" :aria-controls="bodyId" @click="toggle">
         {{ open ? '접기' : '펼치기' }}<span class="sr-only">{{ ' ' + step.title }}</span>
       </button>

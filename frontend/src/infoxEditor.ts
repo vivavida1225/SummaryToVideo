@@ -7,8 +7,13 @@ export function editorUrl(run: InfoXRun): string | null {
     ? `https://infox2.infomaxai.com/studio/library/videos/${run.video_id}?chatboxView=script` : null
 }
 export function editorEligible(run: InfoXRun): boolean {
+  if (run.can_open_editor !== undefined) return run.can_open_editor
   return run.stage === 'ready_for_editor' && ['saved_verified', 'unchanged_verified'].includes(run.asset_save?.state ?? '')
     && run.requires_reconciliation === false && editorUrl(run) !== null
+}
+
+export function manualReviewAvailable(run: InfoXRun): boolean {
+  return run.can_enter_manual_review ?? editorEligible(run)
 }
 
 type Port = Pick<typeof api, 'latestEditor' | 'claimEditor' | 'updateEditor'>
